@@ -61,6 +61,8 @@ fn main() {
         }
         if skip_exports.contains(name) {
             record.export = false;
+        } else {
+            record.export = true;
         }
         latin_glyph_data.insert(Name::new(name).unwrap(), record);
     }

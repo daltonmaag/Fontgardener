@@ -22,7 +22,9 @@ pub struct GlyphRecord {
     pub postscript_name: Option<String>,
     #[serde(default)]
     pub codepoints: Vec<char>,
+    // TODO: Make an enum
     pub opentype_category: Option<String>,
+    // TODO: Write fn default that sets true here
     #[serde(default = "default_true")]
     pub export: bool,
 }
