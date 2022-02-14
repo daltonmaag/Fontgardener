@@ -19,7 +19,7 @@ fn main() {
     let source_light_name = Name::new("Light").unwrap();
     let mut source_light = lib::Source::default();
     for layer in ufo_lt.iter_layers() {
-        let our_layer = lib::Layer::from_ufo_layer(&layer, &latin_glyphs);
+        let our_layer = lib::Layer::from_ufo_layer(layer, &latin_glyphs);
         source_light.layers.insert(layer.name().clone(), our_layer);
     }
 
@@ -27,7 +27,7 @@ fn main() {
     let source_bold_name = Name::new("Bold").unwrap();
     let mut source_bold = lib::Source::default();
     for layer in ufo_bd.iter_layers() {
-        let our_layer = lib::Layer::from_ufo_layer(&layer, &latin_glyphs);
+        let our_layer = lib::Layer::from_ufo_layer(layer, &latin_glyphs);
         source_bold.layers.insert(layer.name().clone(), our_layer);
     }
 
@@ -51,8 +51,10 @@ fn main() {
 
     let mut latin_glyph_data: HashMap<Name, lib::GlyphRecord> = HashMap::new();
     for name in latin_glyphs {
-        let mut record = lib::GlyphRecord::default();
-        record.codepoints = ufo_lt.get_glyph(name).unwrap().codepoints.clone();
+        let mut record = lib::GlyphRecord {
+            codepoints: ufo_lt.get_glyph(name).unwrap().codepoints.clone(),
+            ..Default::default()
+        };
         if let Some(postscript_name) = postscript_names.get(name) {
             record.postscript_name = Some(postscript_name.as_string().unwrap().into());
         }
@@ -80,4 +82,6 @@ fn main() {
     let fontgarden = lib::Fontgarden { sets };
 
     println!("{:#?}", &fontgarden);
+
+    fontgarden.save(&tmp_path.join("test.fontgarden"));
 }
