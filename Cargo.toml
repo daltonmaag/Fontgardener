@@ -6,7 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+clap = { version = "3.1.0", features = ["derive"] }
 csv = "1.1"
 norad = { path = "../norad", features = ["rayon"] }
 plist = { version = "1.3.1", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3.3.0"

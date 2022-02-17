@@ -1,87 +1,93 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::Path,
-};
+use std::path::PathBuf;
 
-use norad::Name;
+use clap::{Parser, Subcommand};
 
 mod lib;
 
-const NOTO_TEMP: &str = r"C:\Users\nikolaus.waxweiler\AppData\Local\Dev\nototest";
+#[derive(Parser)]
+#[clap(author, version, about, long_about = None)]
+#[clap(propagate_version = true)]
+struct Cli {
+    #[clap(subcommand)]
+    command: Commands,
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    New {
+        /// Fontgarden package path to create.
+        #[clap(parse(from_os_str))]
+        path: PathBuf,
+    },
+    Import {
+        /// Fontgarden package path to import into.
+        #[clap(parse(from_os_str), value_name = "FONTGARDEN_PATH")]
+        path: PathBuf,
+
+        /// Text file of glyphs to import, one per line.
+        #[clap(parse(from_os_str), value_name = "GLYPHS_FILE")]
+        glyph_names_file: PathBuf,
+
+        /// Set to import glyphs into.
+        #[clap(long, default_value = "default")]
+        set_name: String,
+
+        /// Source to import glyphs into [default: infer from style name].
+        #[clap(long)]
+        source_name: Option<String>,
+
+        /// Unified Font Object (UFO) to import from.
+        #[clap(parse(from_os_str))]
+        font: PathBuf,
+    },
+    Export {
+        /// Fontgarden package path to export from.
+        #[clap(parse(from_os_str), value_name = "FONTGARDEN_PATH")]
+        path: PathBuf,
+
+        /// Sets to export glyphs from, in addition to the default set.
+        #[clap(long)]
+        set_names: Vec<String>,
+
+        /// Alternatively, a text file of glyphs to export, one per line.
+        #[clap(parse(from_os_str), value_name = "GLYPHS_FILE")]
+        glyph_names_file: Option<PathBuf>,
+
+        /// Sources to export glyphs for [default: all]
+        #[clap(long)]
+        source_names: Vec<String>,
+
+        /// Directory to export into [default: current dir].
+        #[clap(parse(from_os_str))]
+        output_dir: Option<PathBuf>,
+    },
+}
 
 fn main() {
-    let tmp_path = Path::new(NOTO_TEMP);
+    let cli = Cli::parse();
 
-    let latin_set_name = Name::new("Latin").unwrap();
-    let latin_glyphs = HashSet::from(["A", "B", "Adieresis", "Omega"]);
-
-    let ufo_lt = norad::Font::load(tmp_path.join("NotoSans-Light.ufo")).unwrap();
-    let source_light_name = Name::new("Light").unwrap();
-    let mut source_light = lib::Source::default();
-    for layer in ufo_lt.iter_layers() {
-        let our_layer = lib::Layer::from_ufo_layer(layer, &latin_glyphs);
-        source_light.layers.insert(layer.name().clone(), our_layer);
-    }
-
-    let ufo_bd = norad::Font::load(tmp_path.join("NotoSans-Bold.ufo")).unwrap();
-    let source_bold_name = Name::new("Bold").unwrap();
-    let mut source_bold = lib::Source::default();
-    for layer in ufo_bd.iter_layers() {
-        let our_layer = lib::Layer::from_ufo_layer(layer, &latin_glyphs);
-        source_bold.layers.insert(layer.name().clone(), our_layer);
-    }
-
-    let postscript_names = match ufo_lt.lib.get("public.postscriptNames") {
-        Some(v) => v.as_dictionary().unwrap().clone(),
-        None => norad::Plist::new(),
-    };
-    let opentype_categories = match ufo_lt.lib.get("public.openTypeCategories") {
-        Some(v) => v.as_dictionary().unwrap().clone(),
-        None => norad::Plist::new(),
-    };
-    let skip_exports: HashSet<String> = match ufo_lt.lib.get("public.skipExportGlyphs") {
-        Some(v) => v
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_string().unwrap().to_string())
-            .collect(),
-        None => HashSet::new(),
-    };
-
-    let mut latin_glyph_data: HashMap<Name, lib::GlyphRecord> = HashMap::new();
-    for name in latin_glyphs {
-        let mut record = lib::GlyphRecord {
-            codepoints: ufo_lt.get_glyph(name).unwrap().codepoints.clone(),
-            ..Default::default()
-        };
-        if let Some(postscript_name) = postscript_names.get(name) {
-            record.postscript_name = Some(postscript_name.as_string().unwrap().into());
+    match &cli.command {
+        Commands::New { path } => {
+            let fontgarden = lib::Fontgarden::new();
+            fontgarden.save(path);
         }
-        if let Some(opentype_category) = opentype_categories.get(name) {
-            record.opentype_category = Some(opentype_category.as_string().unwrap().into());
+        Commands::Import {
+            path,
+            glyph_names_file,
+            set_name,
+            source_name,
+            font,
+        } => {
+            todo!()
         }
-        if skip_exports.contains(name) {
-            record.export = false;
-        } else {
-            record.export = true;
+        Commands::Export {
+            path,
+            set_names,
+            glyph_names_file,
+            source_names,
+            output_dir,
+        } => {
+            todo!()
         }
-        latin_glyph_data.insert(Name::new(name).unwrap(), record);
     }
-
-    let mut sources = HashMap::new();
-    sources.insert(source_light_name, source_light);
-    sources.insert(source_bold_name, source_bold);
-    let latin_set = lib::Set {
-        glyph_data: latin_glyph_data,
-        sources,
-    };
-
-    let mut sets = HashMap::new();
-    sets.insert(latin_set_name, latin_set);
-    let fontgarden = lib::Fontgarden { sets };
-
-    println!("{:#?}", &fontgarden);
-
-    fontgarden.save(&tmp_path.join("test.fontgarden"));
 }
