@@ -5,8 +5,7 @@ use clap::{Parser, Subcommand};
 mod lib;
 
 #[derive(Parser)]
-#[clap(author, version, about, long_about = None)]
-#[clap(propagate_version = true)]
+#[clap(author, version, about, long_about = None, propagate_version = true)]
 struct Cli {
     #[clap(subcommand)]
     command: Commands,
@@ -78,7 +77,18 @@ fn main() {
             source_name,
             font,
         } => {
-            todo!()
+            let mut fontgarden = lib::Fontgarden::from_path(&path).expect("can't load fontgarden");
+            let import_glyphs =
+                lib::load_glyph_list(&glyph_names_file).expect("can't load glyphs file");
+            let font = norad::Font::load(&font).expect("can't load font");
+            let source_name = source_name
+                .as_ref()
+                .or(font.font_info.style_name.as_ref())
+                .expect("can't determine source name to import into");
+            fontgarden
+                .import(&font, &import_glyphs, &set_name, &source_name)
+                .expect("can't import font");
+            fontgarden.save(&path)
         }
         Commands::Export {
             path,

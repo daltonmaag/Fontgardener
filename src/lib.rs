@@ -46,9 +46,9 @@ pub struct Layer {
     pub color_marks: HashMap<Name, norad::Color>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct LayerInfo {
-    name: String,
+    name: Name,
     #[serde(default)]
     default: bool,
 }
@@ -59,6 +59,8 @@ pub enum LoadError {
     Io(#[from] std::io::Error),
     #[error("a fontgarden must be a directory")]
     NotAFontgarden,
+    #[error("cannot import a glyph as it's in a different set already")]
+    DuplicateGlyph,
 }
 
 impl Layer {
@@ -85,7 +87,7 @@ impl Layer {
         }
     }
 
-    fn save(&self, layer_name: &str, source_path: &Path) {
+    fn save(&self, layer_name: &Name, source_path: &Path) {
         if self.glyphs.is_empty() {
             return;
         }
@@ -94,7 +96,7 @@ impl Layer {
 
         // TODO: determine default layer
         let layerinfo = LayerInfo {
-            name: layer_name.into(),
+            name: layer_name.clone(),
             default: false,
         };
         plist::to_file_xml(layer_path.join("layerinfo.plist"), &layerinfo)
@@ -127,19 +129,31 @@ impl Fontgarden {
     }
 
     pub fn from_path(path: &Path) -> Result<Self, LoadError> {
-        let fontgarden = Self::new();
+        let mut fontgarden = Self::new();
+        let mut seen_glyph_names: HashSet<Name> = HashSet::new();
 
         if path.is_dir() {
             for entry in std::fs::read_dir(path)? {
                 let entry = entry?;
                 let path = entry.path();
                 if path.is_dir() {
-                    if path
+                    if let Some(Some(set_name)) = path
                         .file_name()
-                        .map(|n| n.to_string_lossy().starts_with("set."))
-                        .unwrap_or(false)
+                        .map(|n| n.to_string_lossy().strip_prefix("set."))
                     {
-                        todo!();
+                        let set = Set::from_path(&path)?;
+                        let coverage = set.glyph_coverage();
+                        if !seen_glyph_names
+                            .intersection(&coverage)
+                            .collect::<Vec<_>>()
+                            .is_empty()
+                        {
+                            return Err(LoadError::DuplicateGlyph);
+                        }
+                        seen_glyph_names.extend(coverage);
+                        fontgarden
+                            .sets
+                            .insert(Name::new(&set_name).expect("can't read set name"), set);
                     }
                 }
             }
@@ -148,6 +162,16 @@ impl Fontgarden {
         }
 
         Ok(fontgarden)
+    }
+
+    pub fn import(
+        &mut self,
+        font: &norad::Font,
+        glyphs: &HashSet<String>,
+        set_name: &str,
+        source_name: &str,
+    ) -> Result<(), LoadError> {
+        todo!()
     }
 }
 
@@ -178,6 +202,74 @@ impl Set {
         }
         writer.flush().expect("can't flush csv");
     }
+
+    fn from_path(path: &std::path::PathBuf) -> Result<Self, LoadError> {
+        let glyph_data = load_glyph_data(&path.join("glyph_data.csv"));
+
+        let mut sources = HashMap::new();
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(source_name) = path
+                    .file_name()
+                    .and_then(|n| n.to_string_lossy().strip_prefix("source."))
+                {
+                    let source = Source::from_path(&path)?;
+                    sources.insert(
+                        Name::new(source_name).expect("can't read source name"),
+                        source,
+                    );
+                }
+            }
+        }
+
+        Ok(Set {
+            glyph_data,
+            sources,
+        })
+    }
+
+    fn glyph_coverage(&self) -> HashSet<Name> {
+        let mut glyphs = HashSet::new();
+        glyphs.extend(self.glyph_data.keys().cloned());
+        for (_, source) in &self.sources {
+            for (_, layer) in &source.layers {
+                glyphs.extend(layer.glyphs.keys().cloned());
+            }
+        }
+        glyphs
+    }
+}
+
+fn load_glyph_data(path: &Path) -> HashMap<Name, GlyphRecord> {
+    let mut glyph_data = HashMap::new();
+    let mut reader = csv::Reader::from_path(path).expect("can't open glyph_data.csv");
+
+    type Record = (String, Option<String>, Option<String>, Option<String>, bool);
+    for result in reader.deserialize() {
+        let record: Record = result.expect("can't read record");
+        glyph_data.insert(
+            Name::new(&record.0).expect("can't read glyph name"),
+            GlyphRecord {
+                postscript_name: record.1,
+                codepoints: record.2.map(|v| parse_codepoints(&v)).unwrap_or(Vec::new()),
+                opentype_category: record.3,
+                export: record.4,
+            },
+        );
+    }
+
+    glyph_data
+}
+
+fn parse_codepoints(v: &str) -> Vec<char> {
+    v.split_whitespace()
+        .map(|v| {
+            char::try_from(u32::from_str_radix(v, 16).expect("can't parse codepoint"))
+                .expect("can't convert codepoint to character")
+        })
+        .collect()
 }
 
 impl GlyphRecord {
@@ -217,6 +309,11 @@ impl GlyphRecord {
 
         Ok(())
     }
+
+    // pub fn read_records(reader: &mut csv::Reader<File>) -> (Name, GlyphRecord) {
+    //     type Record = (String, Option<String>, Option<String>, Option<String>, bool);
+
+    // }
 }
 
 impl Source {
@@ -229,6 +326,59 @@ impl Source {
     }
 }
 
+fn extract_glyph_data(font: &norad::Font, glyphs: &HashSet<&str>) -> HashMap<Name, GlyphRecord> {
+    let mut glyph_data: HashMap<Name, GlyphRecord> = HashMap::new();
+
+    let postscript_names = match font.lib.get("public.postscriptNames") {
+        Some(v) => v.as_dictionary().unwrap().clone(),
+        None => norad::Plist::new(),
+    };
+    let opentype_categories = match font.lib.get("public.openTypeCategories") {
+        Some(v) => v.as_dictionary().unwrap().clone(),
+        None => norad::Plist::new(),
+    };
+    let skip_exports: HashSet<String> = match font.lib.get("public.skipExportGlyphs") {
+        Some(v) => v
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_string().unwrap().to_string())
+            .collect(),
+        None => HashSet::new(),
+    };
+
+    for name in glyphs {
+        let mut record = GlyphRecord {
+            codepoints: font.get_glyph(name).unwrap().codepoints.clone(),
+            ..Default::default()
+        };
+        if let Some(postscript_name) = postscript_names.get(name) {
+            record.postscript_name = Some(postscript_name.as_string().unwrap().into());
+        }
+        if let Some(opentype_category) = opentype_categories.get(name) {
+            record.opentype_category = Some(opentype_category.as_string().unwrap().into());
+        }
+        if skip_exports.contains(*name) {
+            record.export = false;
+        } else {
+            record.export = true;
+        }
+        glyph_data.insert(Name::new(name).unwrap(), record);
+    }
+
+    glyph_data
+}
+
+pub(crate) fn load_glyph_list(path: &Path) -> Result<HashSet<String>, std::io::Error> {
+    let names: HashSet<String> = std::fs::read_to_string(path)?
+        .lines()
+        .map(|s| s.trim()) // Remove whitespace for line
+        .filter(|s| !s.is_empty()) // Drop now empty lines
+        .map(String::from)
+        .collect();
+    Ok(names)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,7 +386,20 @@ mod tests {
     const NOTO_TEMP: &str = r"C:\Users\nikolaus.waxweiler\AppData\Local\Dev\nototest";
 
     #[test]
+    fn load_empty() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+
+        let fontgarden = Fontgarden::new();
+        fontgarden.save(tempdir.path());
+        let fontgarden2 = Fontgarden::from_path(tempdir.path()).unwrap();
+
+        assert_eq!(fontgarden, fontgarden2);
+    }
+
+    #[test]
     fn it_works() {
+        // let tempdir = tempfile::TempDir::new().unwrap();
+
         let tmp_path = Path::new(NOTO_TEMP);
 
         let latin_set_name = Name::new("Latin").unwrap();
@@ -244,57 +407,27 @@ mod tests {
 
         let ufo_lt = norad::Font::load(tmp_path.join("NotoSans-Light.ufo")).unwrap();
         let source_light_name = Name::new("Light").unwrap();
-        let mut source_light = Source::default();
+        let mut source_light_layers: HashMap<Name, Layer> = HashMap::new();
         for layer in ufo_lt.iter_layers() {
             let our_layer = Layer::from_ufo_layer(layer, &latin_glyphs);
-            source_light.layers.insert(layer.name().clone(), our_layer);
+            source_light_layers.insert(layer.name().clone(), our_layer);
         }
+        let source_light = Source {
+            layers: source_light_layers,
+        };
 
         let ufo_bd = norad::Font::load(tmp_path.join("NotoSans-Bold.ufo")).unwrap();
         let source_bold_name = Name::new("Bold").unwrap();
-        let mut source_bold = Source::default();
+        let mut source_bold_layers: HashMap<Name, Layer> = HashMap::new();
         for layer in ufo_bd.iter_layers() {
             let our_layer = Layer::from_ufo_layer(layer, &latin_glyphs);
-            source_bold.layers.insert(layer.name().clone(), our_layer);
+            source_bold_layers.insert(layer.name().clone(), our_layer);
         }
-
-        let postscript_names = match ufo_lt.lib.get("public.postscriptNames") {
-            Some(v) => v.as_dictionary().unwrap().clone(),
-            None => norad::Plist::new(),
-        };
-        let opentype_categories = match ufo_lt.lib.get("public.openTypeCategories") {
-            Some(v) => v.as_dictionary().unwrap().clone(),
-            None => norad::Plist::new(),
-        };
-        let skip_exports: HashSet<String> = match ufo_lt.lib.get("public.skipExportGlyphs") {
-            Some(v) => v
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|v| v.as_string().unwrap().to_string())
-                .collect(),
-            None => HashSet::new(),
+        let source_bold = Source {
+            layers: source_bold_layers,
         };
 
-        let mut latin_glyph_data: HashMap<Name, GlyphRecord> = HashMap::new();
-        for name in latin_glyphs {
-            let mut record = GlyphRecord {
-                codepoints: ufo_lt.get_glyph(name).unwrap().codepoints.clone(),
-                ..Default::default()
-            };
-            if let Some(postscript_name) = postscript_names.get(name) {
-                record.postscript_name = Some(postscript_name.as_string().unwrap().into());
-            }
-            if let Some(opentype_category) = opentype_categories.get(name) {
-                record.opentype_category = Some(opentype_category.as_string().unwrap().into());
-            }
-            if skip_exports.contains(name) {
-                record.export = false;
-            } else {
-                record.export = true;
-            }
-            latin_glyph_data.insert(Name::new(name).unwrap(), record);
-        }
+        let latin_glyph_data = extract_glyph_data(&ufo_lt, &latin_glyphs);
 
         let mut sources = HashMap::new();
         sources.insert(source_light_name, source_light);
@@ -310,16 +443,9 @@ mod tests {
 
         println!("{:#?}", &fontgarden);
 
-        fontgarden.save(&tmp_path.join("test.fontgarden"));
-    }
-
-    #[test]
-    fn load_empty() {
-        let tempdir = tempfile::TempDir::new().unwrap();
-
-        let fontgarden = Fontgarden::new();
-        fontgarden.save(tempdir.path());
-        let fontgarden2 = Fontgarden::from_path(tempdir.path()).unwrap();
+        let fg_path = tmp_path.join("test.fontgarden");
+        fontgarden.save(&fg_path);
+        let fontgarden2 = Fontgarden::from_path(&fg_path).unwrap();
 
         assert_eq!(fontgarden, fontgarden2);
     }
