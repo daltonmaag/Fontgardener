@@ -109,6 +109,63 @@ impl Layer {
             glyph.save(&glyph_path).expect("can't write glif file");
             filenames.insert(filename.to_string_lossy().to_string());
         }
+
+        write_color_marks(&layer_path.join("color_marks.csv"), &self.color_marks);
+    }
+
+    fn from_path(path: &Path) -> Result<(Self, LayerInfo), LoadError> {
+        let mut glyphs = HashMap::new();
+        let color_marks = load_color_marks(&path.join("color_marks.csv"));
+        let layerinfo: LayerInfo =
+            plist::from_file(path.join("layerinfo.plist")).expect("can't load layerinfo");
+
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                if path
+                    .extension()
+                    .and_then(|n| Some(n == "glif"))
+                    .unwrap_or(false)
+                {
+                    let glif = norad::Glyph::load(&path).expect("can't load glif");
+                    glyphs.insert(glif.name.clone(), glif);
+                }
+            }
+        }
+
+        Ok((
+            Layer {
+                glyphs,
+                color_marks,
+            },
+            layerinfo,
+        ))
+    }
+}
+
+fn load_color_marks(path: &Path) -> HashMap<Name, Color> {
+    let mut color_marks = HashMap::new();
+
+    if !path.exists() {
+        return color_marks;
+    }
+
+    let mut rdr = csv::Reader::from_path(&path).expect("can't open color_marks.csv");
+    for result in rdr.deserialize() {
+        let record: (Name, Color) = result.expect("can't read color mark");
+        color_marks.insert(record.0, record.1);
+    }
+    color_marks
+}
+
+fn write_color_marks(path: &Path, color_marks: &HashMap<Name, Color>) {
+    let mut wtr = csv::Writer::from_path(&path).expect("can't open color_marks.csv");
+    wtr.write_record(&["name", "color"])
+        .expect("can't write color_marks header");
+    for (name, color) in color_marks {
+        wtr.serialize((name, color))
+            .expect("can't write color_marks row");
     }
 }
 
@@ -136,11 +193,13 @@ impl Fontgarden {
             for entry in std::fs::read_dir(path)? {
                 let entry = entry?;
                 let path = entry.path();
-                if path.is_dir() {
-                    if let Some(Some(set_name)) = path
+                let metadata = entry.metadata()?;
+                if metadata.is_dir() {
+                    let name = path
                         .file_name()
-                        .map(|n| n.to_string_lossy().strip_prefix("set."))
-                    {
+                        .expect("can't read filename")
+                        .to_string_lossy();
+                    if let Some(set_name) = name.strip_prefix("set.") {
                         let set = Set::from_path(&path)?;
                         let coverage = set.glyph_coverage();
                         if !seen_glyph_names
@@ -210,11 +269,13 @@ impl Set {
         for entry in std::fs::read_dir(path)? {
             let entry = entry?;
             let path = entry.path();
-            if path.is_dir() {
-                if let Some(source_name) = path
+            let metadata = entry.metadata()?;
+            if metadata.is_dir() {
+                let name = path
                     .file_name()
-                    .and_then(|n| n.to_string_lossy().strip_prefix("source."))
-                {
+                    .expect("can't read filename")
+                    .to_string_lossy();
+                if let Some(source_name) = name.strip_prefix("source.") {
                     let source = Source::from_path(&path)?;
                     sources.insert(
                         Name::new(source_name).expect("can't read source name"),
@@ -309,11 +370,6 @@ impl GlyphRecord {
 
         Ok(())
     }
-
-    // pub fn read_records(reader: &mut csv::Reader<File>) -> (Name, GlyphRecord) {
-    //     type Record = (String, Option<String>, Option<String>, Option<String>, bool);
-
-    // }
 }
 
 impl Source {
@@ -323,6 +379,28 @@ impl Source {
         for (layer_name, layer) in &self.layers {
             layer.save(layer_name, &source_path);
         }
+    }
+
+    fn from_path(path: &Path) -> Result<Self, LoadError> {
+        let mut layers = HashMap::new();
+
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            let path = entry.path();
+            let metadata = entry.metadata()?;
+            if metadata.is_dir() {
+                if path
+                    .file_name()
+                    .and_then(|n| Some(n.to_string_lossy().starts_with("glyphs.")))
+                    .unwrap_or(false)
+                {
+                    let (layer, layerinfo) = Layer::from_path(&path)?;
+                    layers.insert(layerinfo.name, layer);
+                }
+            }
+        }
+
+        Ok(Source { layers })
     }
 }
 
@@ -381,6 +459,8 @@ pub(crate) fn load_glyph_list(path: &Path) -> Result<HashSet<String>, std::io::E
 
 #[cfg(test)]
 mod tests {
+    // use pretty_assertions::assert_eq;
+
     use super::*;
 
     const NOTO_TEMP: &str = r"C:\Users\nikolaus.waxweiler\AppData\Local\Dev\nototest";
@@ -410,7 +490,9 @@ mod tests {
         let mut source_light_layers: HashMap<Name, Layer> = HashMap::new();
         for layer in ufo_lt.iter_layers() {
             let our_layer = Layer::from_ufo_layer(layer, &latin_glyphs);
-            source_light_layers.insert(layer.name().clone(), our_layer);
+            if !our_layer.glyphs.is_empty() {
+                source_light_layers.insert(layer.name().clone(), our_layer);
+            }
         }
         let source_light = Source {
             layers: source_light_layers,
@@ -421,7 +503,9 @@ mod tests {
         let mut source_bold_layers: HashMap<Name, Layer> = HashMap::new();
         for layer in ufo_bd.iter_layers() {
             let our_layer = Layer::from_ufo_layer(layer, &latin_glyphs);
-            source_bold_layers.insert(layer.name().clone(), our_layer);
+            if !our_layer.glyphs.is_empty() {
+                source_bold_layers.insert(layer.name().clone(), our_layer);
+            }
         }
         let source_bold = Source {
             layers: source_bold_layers,
@@ -441,7 +525,7 @@ mod tests {
         sets.insert(latin_set_name, latin_set);
         let fontgarden = Fontgarden { sets };
 
-        println!("{:#?}", &fontgarden);
+        // println!("{:#?}", &fontgarden);
 
         let fg_path = tmp_path.join("test.fontgarden");
         fontgarden.save(&fg_path);
