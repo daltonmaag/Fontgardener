@@ -13,7 +13,7 @@ pub struct Fontgarden {
     pub sets: HashMap<Name, Set>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct Set {
     pub glyph_data: HashMap<Name, GlyphRecord>,
     pub sources: HashMap<Name, Source>,
@@ -64,7 +64,7 @@ pub enum LoadError {
 }
 
 impl Layer {
-    pub fn from_ufo_layer(layer: &norad::Layer, glyph_names: &HashSet<&str>) -> Self {
+    pub fn from_ufo_layer(layer: &norad::Layer, glyph_names: &HashSet<String>) -> Self {
         let mut glyphs = HashMap::new();
         let mut color_marks = HashMap::new();
 
@@ -227,10 +227,24 @@ impl Fontgarden {
         &mut self,
         font: &norad::Font,
         glyphs: &HashSet<String>,
-        set_name: &str,
-        source_name: &str,
+        set_name: &Name,
+        source_name: &Name,
     ) -> Result<(), LoadError> {
-        todo!()
+        let set = self.sets.entry(set_name.clone()).or_default();
+        let source = set.sources.entry(source_name.clone()).or_default();
+
+        // TODO: check for glyph uniqueness per set
+        let glyph_data = extract_glyph_data(font, glyphs);
+        set.glyph_data.extend(glyph_data);
+
+        for layer in font.iter_layers() {
+            let our_layer = Layer::from_ufo_layer(layer, &glyphs);
+            if !our_layer.glyphs.is_empty() {
+                source.layers.insert(layer.name().clone(), our_layer);
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -404,7 +418,7 @@ impl Source {
     }
 }
 
-fn extract_glyph_data(font: &norad::Font, glyphs: &HashSet<&str>) -> HashMap<Name, GlyphRecord> {
+fn extract_glyph_data(font: &norad::Font, glyphs: &HashSet<String>) -> HashMap<Name, GlyphRecord> {
     let mut glyph_data: HashMap<Name, GlyphRecord> = HashMap::new();
 
     let postscript_names = match font.lib.get("public.postscriptNames") {
@@ -436,7 +450,7 @@ fn extract_glyph_data(font: &norad::Font, glyphs: &HashSet<&str>) -> HashMap<Nam
         if let Some(opentype_category) = opentype_categories.get(name) {
             record.opentype_category = Some(opentype_category.as_string().unwrap().into());
         }
-        if skip_exports.contains(*name) {
+        if skip_exports.contains(name) {
             record.export = false;
         } else {
             record.export = true;
@@ -483,7 +497,8 @@ mod tests {
         let tmp_path = Path::new(NOTO_TEMP);
 
         let latin_set_name = Name::new("Latin").unwrap();
-        let latin_glyphs = HashSet::from(["A", "B", "Adieresis", "Omega"]);
+        let latin_glyphs: HashSet<String> =
+            HashSet::from(["A".into(), "B".into(), "Adieresis".into(), "Omega".into()]);
 
         let ufo_lt = norad::Font::load(tmp_path.join("NotoSans-Light.ufo")).unwrap();
         let source_light_name = Name::new("Light").unwrap();
@@ -528,6 +543,34 @@ mod tests {
         // println!("{:#?}", &fontgarden);
 
         let fg_path = tmp_path.join("test.fontgarden");
+        fontgarden.save(&fg_path);
+        let fontgarden2 = Fontgarden::from_path(&fg_path).unwrap();
+
+        assert_eq!(fontgarden, fontgarden2);
+    }
+
+    #[test]
+    fn it_works2() {
+        // let tempdir = tempfile::TempDir::new().unwrap();
+
+        let tmp_path = Path::new(NOTO_TEMP);
+
+        let glyphs: HashSet<String> =
+            HashSet::from(["A".into(), "B".into(), "Adieresis".into(), "Omega".into()]);
+        let set_name = Name::new("Latin").unwrap();
+
+        let ufo1 = norad::Font::load(tmp_path.join("NotoSans-Light.ufo")).unwrap();
+        let ufo2 = norad::Font::load(tmp_path.join("NotoSans-Bold.ufo")).unwrap();
+
+        let mut fontgarden = Fontgarden::new();
+        fontgarden
+            .import(&ufo1, &glyphs, &set_name, &Name::new("Light").unwrap())
+            .unwrap();
+        fontgarden
+            .import(&ufo2, &glyphs, &set_name, &Name::new("Bold").unwrap())
+            .unwrap();
+
+        let fg_path = tmp_path.join("test2.fontgarden");
         fontgarden.save(&fg_path);
         let fontgarden2 = Fontgarden::from_path(&fg_path).unwrap();
 

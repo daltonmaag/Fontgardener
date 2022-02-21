@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use norad::Name;
 
 mod lib;
 
@@ -29,11 +30,11 @@ enum Commands {
 
         /// Set to import glyphs into.
         #[clap(long, default_value = "default")]
-        set_name: String,
+        set_name: Name,
 
         /// Source to import glyphs into [default: infer from style name].
         #[clap(long)]
-        source_name: Option<String>,
+        source_name: Option<Name>,
 
         /// Unified Font Object (UFO) to import from.
         #[clap(parse(from_os_str))]
@@ -46,7 +47,7 @@ enum Commands {
 
         /// Sets to export glyphs from, in addition to the default set.
         #[clap(long)]
-        set_names: Vec<String>,
+        set_names: Vec<Name>,
 
         /// Alternatively, a text file of glyphs to export, one per line.
         #[clap(parse(from_os_str), value_name = "GLYPHS_FILE")]
@@ -54,7 +55,7 @@ enum Commands {
 
         /// Sources to export glyphs for [default: all]
         #[clap(long)]
-        source_names: Vec<String>,
+        source_names: Vec<Name>,
 
         /// Directory to export into [default: current dir].
         #[clap(parse(from_os_str))]
@@ -81,9 +82,14 @@ fn main() {
             let import_glyphs =
                 lib::load_glyph_list(&glyph_names_file).expect("can't load glyphs file");
             let font = norad::Font::load(&font).expect("can't load font");
+            let source_name_font = font
+                .font_info
+                .style_name
+                .as_ref()
+                .map(|v| Name::new(&v).unwrap());
             let source_name = source_name
                 .as_ref()
-                .or(font.font_info.style_name.as_ref())
+                .or(source_name_font.as_ref())
                 .expect("can't determine source name to import into");
             fontgarden
                 .import(&font, &import_glyphs, &set_name, &source_name)
