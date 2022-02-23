@@ -1,12 +1,13 @@
 use std::{
     collections::{HashMap, HashSet},
-    fs::File,
     path::Path,
     str::FromStr,
 };
 
 use norad::{Color, Name};
 use serde::{Deserialize, Serialize};
+
+mod metadata;
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Fontgarden {
@@ -110,12 +111,12 @@ impl Layer {
             filenames.insert(filename.to_string_lossy().to_string());
         }
 
-        write_color_marks(&layer_path.join("color_marks.csv"), &self.color_marks);
+        metadata::write_color_marks(&layer_path.join("color_marks.csv"), &self.color_marks);
     }
 
     fn from_path(path: &Path) -> Result<(Self, LayerInfo), LoadError> {
         let mut glyphs = HashMap::new();
-        let color_marks = load_color_marks(&path.join("color_marks.csv"));
+        let color_marks = metadata::load_color_marks(&path.join("color_marks.csv"));
         let layerinfo: LayerInfo =
             plist::from_file(path.join("layerinfo.plist")).expect("can't load layerinfo");
 
@@ -141,31 +142,6 @@ impl Layer {
             },
             layerinfo,
         ))
-    }
-}
-
-fn load_color_marks(path: &Path) -> HashMap<Name, Color> {
-    let mut color_marks = HashMap::new();
-
-    if !path.exists() {
-        return color_marks;
-    }
-
-    let mut rdr = csv::Reader::from_path(&path).expect("can't open color_marks.csv");
-    for result in rdr.deserialize() {
-        let record: (Name, Color) = result.expect("can't read color mark");
-        color_marks.insert(record.0, record.1);
-    }
-    color_marks
-}
-
-fn write_color_marks(path: &Path, color_marks: &HashMap<Name, Color>) {
-    let mut wtr = csv::Writer::from_path(&path).expect("can't open color_marks.csv");
-    wtr.write_record(&["name", "color"])
-        .expect("can't write color_marks header");
-    for (name, color) in color_marks {
-        wtr.serialize((name, color))
-            .expect("can't write color_marks row");
     }
 }
 
@@ -234,6 +210,7 @@ impl Fontgarden {
         let source = set.sources.entry(source_name.clone()).or_default();
 
         // TODO: check for glyph uniqueness per set
+        // TODO: follow components and check if they are present in another set
         let glyph_data = extract_glyph_data(font, glyphs);
         set.glyph_data.extend(glyph_data);
 
@@ -253,31 +230,15 @@ impl Set {
         let set_path = root_path.join(format!("set.{set_name}"));
         std::fs::create_dir(&set_path).expect("can't create set dir");
 
-        self.write_glyph_data(&set_path);
+        metadata::write_glyph_data(&self.glyph_data, &set_path.join("glyph_data.csv"));
 
         for (source_name, source) in &self.sources {
             source.save(source_name, &set_path)
         }
     }
 
-    fn write_glyph_data(&self, set_path: &Path) {
-        let glyph_data_csv_file =
-            File::create(&set_path.join("glyph_data.csv")).expect("can't create glyph_data.csv");
-        let mut glyph_data_keys: Vec<_> = self.glyph_data.keys().collect();
-        glyph_data_keys.sort();
-        let mut writer = csv::Writer::from_writer(glyph_data_csv_file);
-        GlyphRecord::write_header_to_csv(&mut writer).expect("can't write csv");
-        for glyph_name in glyph_data_keys {
-            let record = &self.glyph_data[glyph_name];
-            record
-                .write_row_to_csv(glyph_name, &mut writer)
-                .expect("can't write record");
-        }
-        writer.flush().expect("can't flush csv");
-    }
-
     fn from_path(path: &std::path::PathBuf) -> Result<Self, LoadError> {
-        let glyph_data = load_glyph_data(&path.join("glyph_data.csv"));
+        let glyph_data = metadata::load_glyph_data(&path.join("glyph_data.csv"));
 
         let mut sources = HashMap::new();
         for entry in std::fs::read_dir(path)? {
@@ -314,75 +275,6 @@ impl Set {
             }
         }
         glyphs
-    }
-}
-
-fn load_glyph_data(path: &Path) -> HashMap<Name, GlyphRecord> {
-    let mut glyph_data = HashMap::new();
-    let mut reader = csv::Reader::from_path(path).expect("can't open glyph_data.csv");
-
-    type Record = (String, Option<String>, Option<String>, Option<String>, bool);
-    for result in reader.deserialize() {
-        let record: Record = result.expect("can't read record");
-        glyph_data.insert(
-            Name::new(&record.0).expect("can't read glyph name"),
-            GlyphRecord {
-                postscript_name: record.1,
-                codepoints: record.2.map(|v| parse_codepoints(&v)).unwrap_or(Vec::new()),
-                opentype_category: record.3,
-                export: record.4,
-            },
-        );
-    }
-
-    glyph_data
-}
-
-fn parse_codepoints(v: &str) -> Vec<char> {
-    v.split_whitespace()
-        .map(|v| {
-            char::try_from(u32::from_str_radix(v, 16).expect("can't parse codepoint"))
-                .expect("can't convert codepoint to character")
-        })
-        .collect()
-}
-
-impl GlyphRecord {
-    pub fn write_header_to_csv(
-        writer: &mut csv::Writer<File>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        writer.write_record(&[
-            "name",
-            "postscript_name",
-            "codepoints",
-            "opentype_category",
-            "export",
-        ])?;
-
-        Ok(())
-    }
-
-    pub fn write_row_to_csv(
-        &self,
-        glyph_name: &Name,
-        writer: &mut csv::Writer<File>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let codepoints_str: String = self
-            .codepoints
-            .iter()
-            .map(|c| format!("{:04X}", *c as usize))
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        writer.serialize((
-            glyph_name,
-            &self.postscript_name,
-            codepoints_str,
-            &self.opentype_category,
-            self.export,
-        ))?;
-
-        Ok(())
     }
 }
 
@@ -540,8 +432,6 @@ mod tests {
         sets.insert(latin_set_name, latin_set);
         let fontgarden = Fontgarden { sets };
 
-        // println!("{:#?}", &fontgarden);
-
         let fg_path = tmp_path.join("test.fontgarden");
         fontgarden.save(&fg_path);
         let fontgarden2 = Fontgarden::from_path(&fg_path).unwrap();
@@ -553,21 +443,53 @@ mod tests {
     fn it_works2() {
         // let tempdir = tempfile::TempDir::new().unwrap();
 
+        let mut fontgarden = Fontgarden::new();
+
         let tmp_path = Path::new(NOTO_TEMP);
 
-        let glyphs: HashSet<String> =
-            HashSet::from(["A".into(), "B".into(), "Adieresis".into(), "Omega".into()]);
-        let set_name = Name::new("Latin").unwrap();
+        let latin_glyphs: HashSet<String> =
+            HashSet::from(["A", "B", "Adieresis", "dieresiscomb", "dieresis"].map(String::from));
+        let latin_set_name = Name::new("Latin").unwrap();
 
         let ufo1 = norad::Font::load(tmp_path.join("NotoSans-Light.ufo")).unwrap();
         let ufo2 = norad::Font::load(tmp_path.join("NotoSans-Bold.ufo")).unwrap();
 
-        let mut fontgarden = Fontgarden::new();
         fontgarden
-            .import(&ufo1, &glyphs, &set_name, &Name::new("Light").unwrap())
+            .import(
+                &ufo1,
+                &latin_glyphs,
+                &latin_set_name,
+                &Name::new("Light").unwrap(),
+            )
             .unwrap();
         fontgarden
-            .import(&ufo2, &glyphs, &set_name, &Name::new("Bold").unwrap())
+            .import(
+                &ufo2,
+                &latin_glyphs,
+                &latin_set_name,
+                &Name::new("Bold").unwrap(),
+            )
+            .unwrap();
+
+        let greek_glyphs: HashSet<String> =
+            HashSet::from(["Alpha", "Alphatonos", "tonos.case", "tonos"].map(String::from));
+        let greek_set_name = Name::new("Greek").unwrap();
+
+        fontgarden
+            .import(
+                &ufo1,
+                &greek_glyphs,
+                &greek_set_name,
+                &Name::new("Light").unwrap(),
+            )
+            .unwrap();
+        fontgarden
+            .import(
+                &ufo2,
+                &greek_glyphs,
+                &greek_set_name,
+                &Name::new("Bold").unwrap(),
+            )
             .unwrap();
 
         let fg_path = tmp_path.join("test2.fontgarden");
@@ -575,5 +497,7 @@ mod tests {
         let fontgarden2 = Fontgarden::from_path(&fg_path).unwrap();
 
         assert_eq!(fontgarden, fontgarden2);
+
+        // TODO: rename this module to avoid double testing
     }
 }

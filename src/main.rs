@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use norad::Name;
 
-mod lib;
+mod structs;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None, propagate_version = true)]
@@ -68,7 +68,7 @@ fn main() {
 
     match &cli.command {
         Commands::New { path } => {
-            let fontgarden = lib::Fontgarden::new();
+            let fontgarden = structs::Fontgarden::new();
             fontgarden.save(path);
         }
         Commands::Import {
@@ -78,9 +78,10 @@ fn main() {
             source_name,
             font,
         } => {
-            let mut fontgarden = lib::Fontgarden::from_path(&path).expect("can't load fontgarden");
+            let mut fontgarden =
+                structs::Fontgarden::from_path(&path).expect("can't load fontgarden");
             let import_glyphs =
-                lib::load_glyph_list(&glyph_names_file).expect("can't load glyphs file");
+                structs::load_glyph_list(&glyph_names_file).expect("can't load glyphs file");
             let font = norad::Font::load(&font).expect("can't load font");
             let source_name_font = font
                 .font_info
