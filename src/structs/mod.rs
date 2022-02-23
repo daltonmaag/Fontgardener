@@ -383,66 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn it_works() {
-        // let tempdir = tempfile::TempDir::new().unwrap();
-
-        let tmp_path = Path::new(NOTO_TEMP);
-
-        let latin_set_name = Name::new("Latin").unwrap();
-        let latin_glyphs: HashSet<String> =
-            HashSet::from(["A".into(), "B".into(), "Adieresis".into(), "Omega".into()]);
-
-        let ufo_lt = norad::Font::load(tmp_path.join("NotoSans-Light.ufo")).unwrap();
-        let source_light_name = Name::new("Light").unwrap();
-        let mut source_light_layers: HashMap<Name, Layer> = HashMap::new();
-        for layer in ufo_lt.iter_layers() {
-            let our_layer = Layer::from_ufo_layer(layer, &latin_glyphs);
-            if !our_layer.glyphs.is_empty() {
-                source_light_layers.insert(layer.name().clone(), our_layer);
-            }
-        }
-        let source_light = Source {
-            layers: source_light_layers,
-        };
-
-        let ufo_bd = norad::Font::load(tmp_path.join("NotoSans-Bold.ufo")).unwrap();
-        let source_bold_name = Name::new("Bold").unwrap();
-        let mut source_bold_layers: HashMap<Name, Layer> = HashMap::new();
-        for layer in ufo_bd.iter_layers() {
-            let our_layer = Layer::from_ufo_layer(layer, &latin_glyphs);
-            if !our_layer.glyphs.is_empty() {
-                source_bold_layers.insert(layer.name().clone(), our_layer);
-            }
-        }
-        let source_bold = Source {
-            layers: source_bold_layers,
-        };
-
-        let latin_glyph_data = extract_glyph_data(&ufo_lt, &latin_glyphs);
-
-        let mut sources = HashMap::new();
-        sources.insert(source_light_name, source_light);
-        sources.insert(source_bold_name, source_bold);
-        let latin_set = Set {
-            glyph_data: latin_glyph_data,
-            sources,
-        };
-
-        let mut sets = HashMap::new();
-        sets.insert(latin_set_name, latin_set);
-        let fontgarden = Fontgarden { sets };
-
-        let fg_path = tmp_path.join("test.fontgarden");
-        fontgarden.save(&fg_path);
-        let fontgarden2 = Fontgarden::from_path(&fg_path).unwrap();
-
-        assert_eq!(fontgarden, fontgarden2);
-    }
-
-    #[test]
-    fn it_works2() {
-        // let tempdir = tempfile::TempDir::new().unwrap();
-
+    fn roundtrip() {
         let mut fontgarden = Fontgarden::new();
 
         let tmp_path = Path::new(NOTO_TEMP);
@@ -492,12 +433,11 @@ mod tests {
             )
             .unwrap();
 
-        let fg_path = tmp_path.join("test2.fontgarden");
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let fg_path = tempdir.path().join("test2.fontgarden");
         fontgarden.save(&fg_path);
         let fontgarden2 = Fontgarden::from_path(&fg_path).unwrap();
 
         assert_eq!(fontgarden, fontgarden2);
-
-        // TODO: rename this module to avoid double testing
     }
 }
