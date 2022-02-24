@@ -65,7 +65,7 @@ pub enum LoadError {
 }
 
 impl Layer {
-    pub fn from_ufo_layer(layer: &norad::Layer, glyph_names: &HashSet<String>) -> Self {
+    pub fn from_ufo_layer(layer: &norad::Layer, glyph_names: &HashSet<Name>) -> Self {
         let mut glyphs = HashMap::new();
         let mut color_marks = HashMap::new();
 
@@ -92,7 +92,11 @@ impl Layer {
         if self.glyphs.is_empty() {
             return;
         }
-        let layer_path = source_path.join(format!("glyphs.{layer_name}"));
+        // TODO: keep track of layer file names
+        let layer_path = source_path.join(norad::util::default_file_name_for_layer_name(
+            &layer_name,
+            &HashSet::new(),
+        ));
         std::fs::create_dir(&layer_path).expect("can't create layer dir");
 
         // TODO: determine default layer
@@ -202,7 +206,7 @@ impl Fontgarden {
     pub fn import(
         &mut self,
         font: &norad::Font,
-        glyphs: &HashSet<String>,
+        glyphs: &HashSet<Name>,
         set_name: &Name,
         source_name: &Name,
     ) -> Result<(), LoadError> {
@@ -310,7 +314,7 @@ impl Source {
     }
 }
 
-fn extract_glyph_data(font: &norad::Font, glyphs: &HashSet<String>) -> HashMap<Name, GlyphRecord> {
+fn extract_glyph_data(font: &norad::Font, glyphs: &HashSet<Name>) -> HashMap<Name, GlyphRecord> {
     let mut glyph_data: HashMap<Name, GlyphRecord> = HashMap::new();
 
     let postscript_names = match font.lib.get("public.postscriptNames") {
@@ -342,23 +346,23 @@ fn extract_glyph_data(font: &norad::Font, glyphs: &HashSet<String>) -> HashMap<N
         if let Some(opentype_category) = opentype_categories.get(name) {
             record.opentype_category = Some(opentype_category.as_string().unwrap().into());
         }
-        if skip_exports.contains(name) {
+        if skip_exports.contains(name.as_ref()) {
             record.export = false;
         } else {
             record.export = true;
         }
-        glyph_data.insert(Name::new(name).unwrap(), record);
+        glyph_data.insert(name.clone(), record);
     }
 
     glyph_data
 }
 
-pub(crate) fn load_glyph_list(path: &Path) -> Result<HashSet<String>, std::io::Error> {
-    let names: HashSet<String> = std::fs::read_to_string(path)?
+pub(crate) fn load_glyph_list(path: &Path) -> Result<HashSet<Name>, std::io::Error> {
+    let names: HashSet<Name> = std::fs::read_to_string(path)?
         .lines()
         .map(|s| s.trim()) // Remove whitespace for line
         .filter(|s| !s.is_empty()) // Drop now empty lines
-        .map(String::from)
+        .map(|v| Name::new(v).unwrap())
         .collect();
     Ok(names)
 }
@@ -388,8 +392,9 @@ mod tests {
 
         let tmp_path = Path::new(NOTO_TEMP);
 
-        let latin_glyphs: HashSet<String> =
-            HashSet::from(["A", "B", "Adieresis", "dieresiscomb", "dieresis"].map(String::from));
+        let latin_glyphs: HashSet<Name> = HashSet::from(
+            ["A", "B", "Adieresis", "dieresiscomb", "dieresis"].map(|v| Name::new(&v).unwrap()),
+        );
         let latin_set_name = Name::new("Latin").unwrap();
 
         let ufo1 = norad::Font::load(tmp_path.join("NotoSans-Light.ufo")).unwrap();
@@ -412,8 +417,9 @@ mod tests {
             )
             .unwrap();
 
-        let greek_glyphs: HashSet<String> =
-            HashSet::from(["Alpha", "Alphatonos", "tonos.case", "tonos"].map(String::from));
+        let greek_glyphs: HashSet<Name> = HashSet::from(
+            ["Alpha", "Alphatonos", "tonos.case", "tonos"].map(|v| Name::new(&v).unwrap()),
+        );
         let greek_set_name = Name::new("Greek").unwrap();
 
         fontgarden
@@ -435,6 +441,68 @@ mod tests {
 
         let tempdir = tempfile::TempDir::new().unwrap();
         let fg_path = tempdir.path().join("test2.fontgarden");
+        fontgarden.save(&fg_path);
+        let fontgarden2 = Fontgarden::from_path(&fg_path).unwrap();
+
+        assert_eq!(fontgarden, fontgarden2);
+    }
+
+    #[test]
+    fn roundtrip_big() {
+        let tmp_path = Path::new(NOTO_TEMP);
+        let mut fontgarden = Fontgarden::new();
+
+        let ufo_paths = [
+            "NotoSans-Bold.ufo",
+            "NotoSans-Condensed.ufo",
+            "NotoSans-CondensedBold.ufo",
+            "NotoSans-CondensedLight.ufo",
+            "NotoSans-CondensedSemiBold.ufo",
+            "NotoSans-DisplayBold.ufo",
+            "NotoSans-DisplayBoldCondensed.ufo",
+            "NotoSans-DisplayCondensed.ufo",
+            "NotoSans-DisplayLight.ufo",
+            "NotoSans-DisplayLightCondensed.ufo",
+            "NotoSans-DisplayRegular.ufo",
+            "NotoSans-DisplaySemiBold.ufo",
+            "NotoSans-DisplaySemiBoldCondensed.ufo",
+            "NotoSans-Light.ufo",
+            "NotoSans-Regular.ufo",
+            "NotoSans-SemiBold.ufo",
+        ];
+
+        for ufo_path in ufo_paths {
+            let font = norad::Font::load(tmp_path.join(ufo_path)).unwrap();
+            let source_name = font
+                .font_info
+                .style_name
+                .as_ref()
+                .map(|v| Name::new(&v).unwrap())
+                .unwrap();
+            let mut ufo_glyph_names: HashSet<Name> = font.iter_names().collect();
+
+            for set_path in ["Latin.txt", "Cyrillic.txt", "Greek.txt"] {
+                let set_name = Name::new(set_path.splitn(1, ".").next().unwrap()).unwrap();
+                let set_list = load_glyph_list(&tmp_path.join(set_path)).unwrap();
+
+                fontgarden
+                    .import(&font, &set_list, &set_name, &source_name)
+                    .unwrap();
+                ufo_glyph_names.retain(|n| !set_list.contains(n));
+            }
+
+            // Put remaining glyphs into default set.
+            if !ufo_glyph_names.is_empty() {
+                let set_name = Name::new("default").unwrap();
+                fontgarden
+                    .import(&font, &ufo_glyph_names, &set_name, &source_name)
+                    .unwrap();
+            }
+        }
+
+        // let tempdir = tempfile::TempDir::new().unwrap();
+        // let fg_path = tempdir.path().join("test3.fontgarden");
+        let fg_path = tmp_path.join("test3.fontgarden");
         fontgarden.save(&fg_path);
         let fontgarden2 = Fontgarden::from_path(&fg_path).unwrap();
 
