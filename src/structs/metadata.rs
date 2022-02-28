@@ -17,7 +17,7 @@ pub(crate) fn load_glyph_data(path: &Path) -> HashMap<Name, GlyphRecord> {
             Name::new(&record.0).expect("can't read glyph name"),
             GlyphRecord {
                 postscript_name: record.1,
-                codepoints: record.2.map(|v| parse_codepoints(&v)).unwrap_or(Vec::new()),
+                codepoints: record.2.map(|v| parse_codepoints(&v)).unwrap_or_default(),
                 opentype_category: record.3,
                 export: record.4,
             },

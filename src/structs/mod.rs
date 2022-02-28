@@ -64,6 +64,12 @@ pub enum LoadError {
     DuplicateGlyph,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum ExportError {
+    #[error("failed to load data from disk")]
+    Other(#[from] Box<dyn std::error::Error>),
+}
+
 impl Layer {
     pub fn from_ufo_layer(layer: &norad::Layer, glyph_names: &HashSet<Name>) -> Self {
         let mut glyphs = HashMap::new();
@@ -94,7 +100,7 @@ impl Layer {
         }
         // TODO: keep track of layer file names
         let layer_path = source_path.join(norad::util::default_file_name_for_layer_name(
-            &layer_name,
+            layer_name,
             &HashSet::new(),
         ));
         std::fs::create_dir(&layer_path).expect("can't create layer dir");
@@ -127,15 +133,9 @@ impl Layer {
         for entry in std::fs::read_dir(path)? {
             let entry = entry?;
             let path = entry.path();
-            if path.is_file() {
-                if path
-                    .extension()
-                    .and_then(|n| Some(n == "glif"))
-                    .unwrap_or(false)
-                {
-                    let glif = norad::Glyph::load(&path).expect("can't load glif");
-                    glyphs.insert(glif.name.clone(), glif);
-                }
+            if path.is_file() && path.extension().map(|n| n == "glif").unwrap_or(false) {
+                let glif = norad::Glyph::load(&path).expect("can't load glif");
+                glyphs.insert(glif.name.clone(), glif);
             }
         }
 
@@ -182,17 +182,13 @@ impl Fontgarden {
                     if let Some(set_name) = name.strip_prefix("set.") {
                         let set = Set::from_path(&path)?;
                         let coverage = set.glyph_coverage();
-                        if !seen_glyph_names
-                            .intersection(&coverage)
-                            .collect::<Vec<_>>()
-                            .is_empty()
-                        {
+                        if seen_glyph_names.intersection(&coverage).next().is_some() {
                             return Err(LoadError::DuplicateGlyph);
                         }
                         seen_glyph_names.extend(coverage);
                         fontgarden
                             .sets
-                            .insert(Name::new(&set_name).expect("can't read set name"), set);
+                            .insert(Name::new(set_name).expect("can't read set name"), set);
                     }
                 }
             }
@@ -219,13 +215,28 @@ impl Fontgarden {
         set.glyph_data.extend(glyph_data);
 
         for layer in font.iter_layers() {
-            let our_layer = Layer::from_ufo_layer(layer, &glyphs);
+            let our_layer = Layer::from_ufo_layer(layer, glyphs);
             if !our_layer.glyphs.is_empty() {
                 source.layers.insert(layer.name().clone(), our_layer);
             }
         }
 
         Ok(())
+    }
+
+    pub fn export(
+        &self,
+        set_names: &[Name],
+        glyph_names: &HashSet<Name>,
+        source_names: &HashSet<Name>,
+    ) -> Result<Vec<norad::Font>, ExportError> {
+        let mut ufos = Vec::new();
+
+        for _source_name in source_names {
+            ufos.push(norad::Font::new());
+        }
+
+        Ok(ufos)
     }
 }
 
@@ -241,7 +252,7 @@ impl Set {
         }
     }
 
-    fn from_path(path: &std::path::PathBuf) -> Result<Self, LoadError> {
+    fn from_path(path: &Path) -> Result<Self, LoadError> {
         let glyph_data = metadata::load_glyph_data(&path.join("glyph_data.csv"));
 
         let mut sources = HashMap::new();
@@ -270,11 +281,11 @@ impl Set {
         })
     }
 
-    fn glyph_coverage(&self) -> HashSet<Name> {
+    pub fn glyph_coverage(&self) -> HashSet<Name> {
         let mut glyphs = HashSet::new();
         glyphs.extend(self.glyph_data.keys().cloned());
-        for (_, source) in &self.sources {
-            for (_, layer) in &source.layers {
+        for source in self.sources.values() {
+            for layer in source.layers.values() {
                 glyphs.extend(layer.glyphs.keys().cloned());
             }
         }
@@ -298,15 +309,14 @@ impl Source {
             let entry = entry?;
             let path = entry.path();
             let metadata = entry.metadata()?;
-            if metadata.is_dir() {
-                if path
+            if metadata.is_dir()
+                && path
                     .file_name()
-                    .and_then(|n| Some(n.to_string_lossy().starts_with("glyphs.")))
+                    .map(|n| n.to_string_lossy().starts_with("glyphs."))
                     .unwrap_or(false)
-                {
-                    let (layer, layerinfo) = Layer::from_path(&path)?;
-                    layers.insert(layerinfo.name, layer);
-                }
+            {
+                let (layer, layerinfo) = Layer::from_path(&path)?;
+                layers.insert(layerinfo.name, layer);
             }
         }
 
@@ -393,7 +403,7 @@ mod tests {
         let tmp_path = Path::new(NOTO_TEMP);
 
         let latin_glyphs: HashSet<Name> = HashSet::from(
-            ["A", "B", "Adieresis", "dieresiscomb", "dieresis"].map(|v| Name::new(&v).unwrap()),
+            ["A", "B", "Adieresis", "dieresiscomb", "dieresis"].map(|v| Name::new(v).unwrap()),
         );
         let latin_set_name = Name::new("Latin").unwrap();
 
@@ -418,7 +428,7 @@ mod tests {
             .unwrap();
 
         let greek_glyphs: HashSet<Name> = HashSet::from(
-            ["Alpha", "Alphatonos", "tonos.case", "tonos"].map(|v| Name::new(&v).unwrap()),
+            ["Alpha", "Alphatonos", "tonos.case", "tonos"].map(|v| Name::new(v).unwrap()),
         );
         let greek_set_name = Name::new("Greek").unwrap();
 
@@ -477,12 +487,12 @@ mod tests {
                 .font_info
                 .style_name
                 .as_ref()
-                .map(|v| Name::new(&v).unwrap())
+                .map(|v| Name::new(v).unwrap())
                 .unwrap();
             let mut ufo_glyph_names: HashSet<Name> = font.iter_names().collect();
 
             for set_path in ["Latin.txt", "Cyrillic.txt", "Greek.txt"] {
-                let set_name = Name::new(set_path.splitn(1, ".").next().unwrap()).unwrap();
+                let set_name = Name::new(set_path.split('.').next().unwrap()).unwrap();
                 let set_list = load_glyph_list(&tmp_path.join(set_path)).unwrap();
 
                 fontgarden
