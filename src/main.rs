@@ -117,10 +117,10 @@ fn main() {
                 }
             };
 
-            let set_names = if set_names.is_empty() {
+            let set_names: HashSet<Name> = if set_names.is_empty() {
                 fontgarden.sets.keys().cloned().collect()
             } else {
-                set_names.clone()
+                set_names.iter().cloned().collect()
             };
 
             let source_names: HashSet<Name> = if source_names.is_empty() {
@@ -141,8 +141,8 @@ fn main() {
                 Some(d) => d.clone(),
                 None => std::env::current_dir().expect("can't get current dir"),
             };
-            for (index, ufo) in ufos.iter().enumerate() {
-                let filename = format!("MyFont-{index}.ufo");
+            for (ufo_name, ufo) in ufos.iter() {
+                let filename = format!("{ufo_name}.ufo");
                 ufo.save(output_dir.join(filename)).expect("can't save ufo");
             }
         }

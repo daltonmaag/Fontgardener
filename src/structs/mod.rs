@@ -226,14 +226,54 @@ impl Fontgarden {
 
     pub fn export(
         &self,
-        set_names: &[Name],
+        set_names: &HashSet<Name>,
         glyph_names: &HashSet<Name>,
         source_names: &HashSet<Name>,
-    ) -> Result<Vec<norad::Font>, ExportError> {
-        let mut ufos = Vec::new();
+    ) -> Result<HashMap<Name, norad::Font>, ExportError> {
+        let mut ufos: HashMap<Name, norad::Font> = HashMap::new();
 
-        for _source_name in source_names {
-            ufos.push(norad::Font::new());
+        for (_, set) in self
+            .sets
+            .iter()
+            .filter(|(name, _)| set_names.contains(*name))
+        {
+            for (source_name, source) in set
+                .sources
+                .iter()
+                .filter(|(name, _)| source_names.contains(*name))
+            {
+                let ufo = ufos
+                    .entry(source_name.clone())
+                    .or_insert_with(norad::Font::new);
+                for (layer_name, layer) in &source.layers {
+                    let layer_glyphs: Vec<_> = layer
+                        .glyphs
+                        .values()
+                        .filter(|g| glyph_names.contains(&*g.name))
+                        .collect();
+                    // TODO: make and deal with default layer
+                    // TODO: always make default layer, but skip empty misc layers
+                    if layer_glyphs.is_empty() {
+                        continue;
+                    }
+                    match ufo.layers.get_mut(layer_name) {
+                        Some(ufo_layer) => {
+                            for glyph in layer_glyphs {
+                                ufo_layer.insert_glyph(glyph.clone());
+                            }
+                        }
+                        None => {
+                            let ufo_layer = ufo
+                                .layers
+                                .new_layer(layer_name)
+                                .expect("can't make new layer");
+                            for glyph in layer_glyphs {
+                                ufo_layer.insert_glyph(glyph.clone());
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         Ok(ufos)
