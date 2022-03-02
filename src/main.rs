@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 use norad::Name;
 
 mod structs;
+mod util;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None, propagate_version = true)]
@@ -81,7 +82,7 @@ fn main() {
             let mut fontgarden =
                 structs::Fontgarden::from_path(fontgarden_path).expect("can't load fontgarden");
             let import_glyphs =
-                structs::load_glyph_list(glyph_names_file).expect("can't load glyphs file");
+                util::load_glyph_list(glyph_names_file).expect("can't load glyphs file");
             let font = norad::Font::load(&font).expect("can't load font");
             let source_name_font = font
                 .font_info
@@ -107,7 +108,7 @@ fn main() {
             let fontgarden =
                 structs::Fontgarden::from_path(fontgarden_path).expect("can't load fontgarden");
             let glyph_names = match glyph_names_file {
-                Some(path) => structs::load_glyph_list(path).expect("can't load glyph names"),
+                Some(path) => crate::util::load_glyph_list(path).expect("can't load glyph names"),
                 None => {
                     let mut names = HashSet::new();
                     for set in fontgarden.sets.values() {

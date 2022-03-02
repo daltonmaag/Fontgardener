@@ -70,97 +70,7 @@ pub enum ExportError {
     Other(#[from] Box<dyn std::error::Error>),
 }
 
-impl Layer {
-    pub fn from_ufo_layer(layer: &norad::Layer, glyph_names: &HashSet<Name>) -> Self {
-        let mut glyphs = HashMap::new();
-        let mut color_marks = HashMap::new();
-
-        for glyph in layer
-            .iter()
-            .filter(|g| glyph_names.contains(g.name.as_str()))
-        {
-            let mut our_glyph = glyph.clone();
-            if let Some(color_string) = our_glyph.lib.remove("public.markColor") {
-                let our_color = Color::from_str(color_string.as_string().unwrap()).unwrap();
-                color_marks.insert(glyph.name.clone(), our_color);
-            }
-            // TODO: split out the codepoints.
-            glyphs.insert(glyph.name.clone(), our_glyph);
-        }
-
-        Self {
-            glyphs,
-            color_marks,
-        }
-    }
-
-    fn save(&self, layer_name: &Name, source_path: &Path) {
-        if self.glyphs.is_empty() {
-            return;
-        }
-        // TODO: keep track of layer file names
-        let layer_path = source_path.join(norad::util::default_file_name_for_layer_name(
-            layer_name,
-            &HashSet::new(),
-        ));
-        std::fs::create_dir(&layer_path).expect("can't create layer dir");
-
-        // TODO: determine default layer
-        let layerinfo = LayerInfo {
-            name: layer_name.clone(),
-            default: false,
-        };
-        plist::to_file_xml(layer_path.join("layerinfo.plist"), &layerinfo)
-            .expect("can't write layerinfo");
-
-        let mut filenames = HashSet::new();
-        for (glyph_name, glyph) in &self.glyphs {
-            let filename = norad::util::default_file_name_for_glyph_name(glyph_name, &filenames);
-            let glyph_path = layer_path.join(&filename);
-            glyph.save(&glyph_path).expect("can't write glif file");
-            filenames.insert(filename.to_string_lossy().to_string());
-        }
-
-        metadata::write_color_marks(&layer_path.join("color_marks.csv"), &self.color_marks);
-    }
-
-    fn from_path(path: &Path) -> Result<(Self, LayerInfo), LoadError> {
-        let mut glyphs = HashMap::new();
-        let color_marks = metadata::load_color_marks(&path.join("color_marks.csv"));
-        let layerinfo: LayerInfo =
-            plist::from_file(path.join("layerinfo.plist")).expect("can't load layerinfo");
-
-        for entry in std::fs::read_dir(path)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_file() && path.extension().map(|n| n == "glif").unwrap_or(false) {
-                let glif = norad::Glyph::load(&path).expect("can't load glif");
-                glyphs.insert(glif.name.clone(), glif);
-            }
-        }
-
-        Ok((
-            Layer {
-                glyphs,
-                color_marks,
-            },
-            layerinfo,
-        ))
-    }
-}
-
 impl Fontgarden {
-    pub fn save(&self, path: &Path) {
-        if path.exists() {
-            std::fs::remove_dir_all(path).expect("can't remove target dir");
-        }
-        std::fs::create_dir(path).expect("can't create target dir");
-
-        for (set_name, set) in &self.sets {
-            set.save(set_name, path);
-        }
-    }
-
     pub fn new() -> Self {
         Self::default()
     }
@@ -199,6 +109,17 @@ impl Fontgarden {
         Ok(fontgarden)
     }
 
+    pub fn save(&self, path: &Path) {
+        if path.exists() {
+            std::fs::remove_dir_all(path).expect("can't remove target dir");
+        }
+        std::fs::create_dir(path).expect("can't create target dir");
+
+        for (set_name, set) in &self.sets {
+            set.save(set_name, path);
+        }
+    }
+
     pub fn import(
         &mut self,
         font: &norad::Font,
@@ -211,7 +132,7 @@ impl Fontgarden {
 
         // TODO: check for glyph uniqueness per set
         // TODO: follow components and check if they are present in another set
-        let glyph_data = extract_glyph_data(font, glyphs);
+        let glyph_data = crate::util::extract_glyph_data(font, glyphs);
         set.glyph_data.extend(glyph_data);
 
         for layer in font.iter_layers() {
@@ -281,17 +202,6 @@ impl Fontgarden {
 }
 
 impl Set {
-    pub fn save(&self, set_name: &Name, root_path: &Path) {
-        let set_path = root_path.join(format!("set.{set_name}"));
-        std::fs::create_dir(&set_path).expect("can't create set dir");
-
-        metadata::write_glyph_data(&self.glyph_data, &set_path.join("glyph_data.csv"));
-
-        for (source_name, source) in &self.sources {
-            source.save(source_name, &set_path)
-        }
-    }
-
     fn from_path(path: &Path) -> Result<Self, LoadError> {
         let glyph_data = metadata::load_glyph_data(&path.join("glyph_data.csv"));
 
@@ -321,6 +231,17 @@ impl Set {
         })
     }
 
+    pub fn save(&self, set_name: &Name, root_path: &Path) {
+        let set_path = root_path.join(format!("set.{set_name}"));
+        std::fs::create_dir(&set_path).expect("can't create set dir");
+
+        metadata::write_glyph_data(&self.glyph_data, &set_path.join("glyph_data.csv"));
+
+        for (source_name, source) in &self.sources {
+            source.save(source_name, &set_path)
+        }
+    }
+
     pub fn glyph_coverage(&self) -> HashSet<Name> {
         let mut glyphs = HashSet::new();
         glyphs.extend(self.glyph_data.keys().cloned());
@@ -334,14 +255,6 @@ impl Set {
 }
 
 impl Source {
-    fn save(&self, source_name: &str, set_path: &Path) {
-        let source_path = set_path.join(format!("source.{source_name}"));
-        std::fs::create_dir(&source_path).expect("can't create source dir");
-        for (layer_name, layer) in &self.layers {
-            layer.save(layer_name, &source_path);
-        }
-    }
-
     fn from_path(path: &Path) -> Result<Self, LoadError> {
         let mut layers = HashMap::new();
 
@@ -362,59 +275,93 @@ impl Source {
 
         Ok(Source { layers })
     }
+
+    fn save(&self, source_name: &str, set_path: &Path) {
+        let source_path = set_path.join(format!("source.{source_name}"));
+        std::fs::create_dir(&source_path).expect("can't create source dir");
+        for (layer_name, layer) in &self.layers {
+            layer.save(layer_name, &source_path);
+        }
+    }
 }
 
-fn extract_glyph_data(font: &norad::Font, glyphs: &HashSet<Name>) -> HashMap<Name, GlyphRecord> {
-    let mut glyph_data: HashMap<Name, GlyphRecord> = HashMap::new();
+impl Layer {
+    fn from_path(path: &Path) -> Result<(Self, LayerInfo), LoadError> {
+        let mut glyphs = HashMap::new();
+        let color_marks = metadata::load_color_marks(&path.join("color_marks.csv"));
+        let layerinfo: LayerInfo =
+            plist::from_file(path.join("layerinfo.plist")).expect("can't load layerinfo");
 
-    let postscript_names = match font.lib.get("public.postscriptNames") {
-        Some(v) => v.as_dictionary().unwrap().clone(),
-        None => norad::Plist::new(),
-    };
-    let opentype_categories = match font.lib.get("public.openTypeCategories") {
-        Some(v) => v.as_dictionary().unwrap().clone(),
-        None => norad::Plist::new(),
-    };
-    let skip_exports: HashSet<String> = match font.lib.get("public.skipExportGlyphs") {
-        Some(v) => v
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_string().unwrap().to_string())
-            .collect(),
-        None => HashSet::new(),
-    };
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() && path.extension().map(|n| n == "glif").unwrap_or(false) {
+                let glif = norad::Glyph::load(&path).expect("can't load glif");
+                glyphs.insert(glif.name.clone(), glif);
+            }
+        }
 
-    for name in glyphs {
-        let mut record = GlyphRecord {
-            codepoints: font.get_glyph(name).unwrap().codepoints.clone(),
-            ..Default::default()
-        };
-        if let Some(postscript_name) = postscript_names.get(name) {
-            record.postscript_name = Some(postscript_name.as_string().unwrap().into());
-        }
-        if let Some(opentype_category) = opentype_categories.get(name) {
-            record.opentype_category = Some(opentype_category.as_string().unwrap().into());
-        }
-        if skip_exports.contains(name.as_ref()) {
-            record.export = false;
-        } else {
-            record.export = true;
-        }
-        glyph_data.insert(name.clone(), record);
+        Ok((
+            Layer {
+                glyphs,
+                color_marks,
+            },
+            layerinfo,
+        ))
     }
 
-    glyph_data
-}
+    pub fn from_ufo_layer(layer: &norad::Layer, glyph_names: &HashSet<Name>) -> Self {
+        let mut glyphs = HashMap::new();
+        let mut color_marks = HashMap::new();
 
-pub(crate) fn load_glyph_list(path: &Path) -> Result<HashSet<Name>, std::io::Error> {
-    let names: HashSet<Name> = std::fs::read_to_string(path)?
-        .lines()
-        .map(|s| s.trim()) // Remove whitespace for line
-        .filter(|s| !s.is_empty()) // Drop now empty lines
-        .map(|v| Name::new(v).unwrap())
-        .collect();
-    Ok(names)
+        for glyph in layer
+            .iter()
+            .filter(|g| glyph_names.contains(g.name.as_str()))
+        {
+            let mut our_glyph = glyph.clone();
+            if let Some(color_string) = our_glyph.lib.remove("public.markColor") {
+                let our_color = Color::from_str(color_string.as_string().unwrap()).unwrap();
+                color_marks.insert(glyph.name.clone(), our_color);
+            }
+            // TODO: split out the codepoints.
+            glyphs.insert(glyph.name.clone(), our_glyph);
+        }
+
+        Self {
+            glyphs,
+            color_marks,
+        }
+    }
+
+    fn save(&self, layer_name: &Name, source_path: &Path) {
+        if self.glyphs.is_empty() {
+            return;
+        }
+        // TODO: keep track of layer file names
+        let layer_path = source_path.join(norad::util::default_file_name_for_layer_name(
+            layer_name,
+            &HashSet::new(),
+        ));
+        std::fs::create_dir(&layer_path).expect("can't create layer dir");
+
+        // TODO: determine default layer
+        let layerinfo = LayerInfo {
+            name: layer_name.clone(),
+            default: false,
+        };
+        plist::to_file_xml(layer_path.join("layerinfo.plist"), &layerinfo)
+            .expect("can't write layerinfo");
+
+        let mut filenames = HashSet::new();
+        for (glyph_name, glyph) in &self.glyphs {
+            let filename = norad::util::default_file_name_for_glyph_name(glyph_name, &filenames);
+            let glyph_path = layer_path.join(&filename);
+            glyph.save(&glyph_path).expect("can't write glif file");
+            filenames.insert(filename.to_string_lossy().to_string());
+        }
+
+        metadata::write_color_marks(&layer_path.join("color_marks.csv"), &self.color_marks);
+    }
 }
 
 #[cfg(test)]
@@ -533,7 +480,7 @@ mod tests {
 
             for set_path in ["Latin.txt", "Cyrillic.txt", "Greek.txt"] {
                 let set_name = Name::new(set_path.split('.').next().unwrap()).unwrap();
-                let set_list = load_glyph_list(&tmp_path.join(set_path)).unwrap();
+                let set_list = crate::util::load_glyph_list(&tmp_path.join(set_path)).unwrap();
 
                 fontgarden
                     .import(&font, &set_list, &set_name, &source_name)
