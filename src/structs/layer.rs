@@ -18,13 +18,14 @@ use super::LoadError;
 pub struct Layer {
     pub glyphs: HashMap<Name, norad::Glyph>,
     pub color_marks: HashMap<Name, norad::Color>,
+    pub default: bool,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct LayerInfo {
     pub name: Name,
     #[serde(default)]
-    default: bool,
+    pub default: bool,
 }
 
 impl Layer {
@@ -47,6 +48,7 @@ impl Layer {
             Layer {
                 glyphs,
                 color_marks,
+                default: layerinfo.default,
             },
             layerinfo,
         ))
@@ -72,6 +74,7 @@ impl Layer {
         Self {
             glyphs,
             color_marks,
+            default: false,
         }
     }
 
@@ -79,17 +82,15 @@ impl Layer {
         if self.glyphs.is_empty() {
             return;
         }
-        // TODO: keep track of layer file names
         let layer_path = source_path.join(default_file_name_for_layer_name(
             layer_name,
             &HashSet::new(),
         ));
         create_dir(&layer_path).expect("can't create layer dir");
 
-        // TODO: determine default layer
         let layerinfo = LayerInfo {
             name: layer_name.clone(),
-            default: false,
+            default: self.default,
         };
         plist::to_file_xml(layer_path.join("layerinfo.plist"), &layerinfo)
             .expect("can't write layerinfo");

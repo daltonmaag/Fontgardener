@@ -48,6 +48,10 @@ pub enum LoadError {
     NotAFontgarden,
     #[error("cannot import a glyph as it's in a different set already")]
     DuplicateGlyph,
+    #[error("no default layer for source found")]
+    NoDefaultLayer,
+    #[error("duplicate default layer for source found")]
+    DuplicateDefaultLayer,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -122,8 +126,11 @@ impl Fontgarden {
         set.glyph_data.extend(glyph_data);
 
         for layer in font.iter_layers() {
-            let our_layer = Layer::from_ufo_layer(layer, glyphs);
-            if !our_layer.glyphs.is_empty() {
+            let mut our_layer = Layer::from_ufo_layer(layer, glyphs);
+            if layer == font.default_layer() {
+                our_layer.default = true;
+                source.layers.insert(layer.name().clone(), our_layer);
+            } else if !our_layer.glyphs.is_empty() {
                 source.layers.insert(layer.name().clone(), our_layer);
             }
         }
@@ -158,24 +165,40 @@ impl Fontgarden {
                         .values()
                         .filter(|g| glyph_names.contains(&*g.name))
                         .collect();
-                    // TODO: make and deal with default layer
-                    // TODO: always make default layer, but skip empty misc layers
                     if layer_glyphs.is_empty() {
                         continue;
                     }
-                    match ufo.layers.get_mut(layer_name) {
-                        Some(ufo_layer) => {
+                    if layer.default {
+                        {
+                            let ufo_layer = ufo.layers.default_layer_mut();
                             for glyph in layer_glyphs {
                                 ufo_layer.insert_glyph(glyph.clone());
                             }
                         }
-                        None => {
-                            let ufo_layer = ufo
-                                .layers
-                                .new_layer(layer_name)
-                                .expect("can't make new layer");
-                            for glyph in layer_glyphs {
-                                ufo_layer.insert_glyph(glyph.clone());
+                        ufo.layers
+                            .rename_layer(
+                                &ufo.layers.default_layer().name().clone(),
+                                layer_name,
+                                false,
+                            )
+                            .unwrap();
+                    } else {
+                        // TODO: make and deal with default layer
+                        // TODO: always make default layer, but skip empty misc layers
+                        match ufo.layers.get_mut(layer_name) {
+                            Some(ufo_layer) => {
+                                for glyph in layer_glyphs {
+                                    ufo_layer.insert_glyph(glyph.clone());
+                                }
+                            }
+                            None => {
+                                let ufo_layer = ufo
+                                    .layers
+                                    .new_layer(layer_name)
+                                    .expect("can't make new layer");
+                                for glyph in layer_glyphs {
+                                    ufo_layer.insert_glyph(glyph.clone());
+                                }
                             }
                         }
                     }

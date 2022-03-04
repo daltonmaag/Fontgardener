@@ -15,6 +15,7 @@ pub struct Source {
 impl Source {
     pub(crate) fn from_path(path: &Path) -> Result<Self, LoadError> {
         let mut layers = HashMap::new();
+        let mut found_default = false;
 
         for entry in read_dir(path)? {
             let entry = entry?;
@@ -27,8 +28,19 @@ impl Source {
                     .unwrap_or(false)
             {
                 let (layer, layerinfo) = Layer::from_path(&path)?;
+                if layerinfo.default {
+                    if !found_default {
+                        found_default = true;
+                    } else {
+                        return Err(LoadError::DuplicateDefaultLayer);
+                    }
+                }
                 layers.insert(layerinfo.name, layer);
             }
+        }
+
+        if !found_default {
+            return Err(LoadError::NoDefaultLayer);
         }
 
         Ok(Source { layers })
