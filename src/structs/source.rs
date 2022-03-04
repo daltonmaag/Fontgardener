@@ -27,6 +27,7 @@ impl Source {
                 })
             {
                 let (layer, layerinfo) = Layer::from_path(&path)?;
+                // TODO: when glyph dir name == "glyphs", assert default layer?
                 if layerinfo.default {
                     if !found_default {
                         found_default = true;
