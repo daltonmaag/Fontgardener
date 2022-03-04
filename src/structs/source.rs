@@ -22,10 +22,9 @@ impl Source {
             let path = entry.path();
             let metadata = entry.metadata()?;
             if metadata.is_dir()
-                && path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().starts_with("glyphs."))
-                    .unwrap_or(false)
+                && path.file_name().map_or(false, |n| {
+                    n == "glyphs" || n.to_string_lossy().starts_with("glyphs.")
+                })
             {
                 let (layer, layerinfo) = Layer::from_path(&path)?;
                 if layerinfo.default {

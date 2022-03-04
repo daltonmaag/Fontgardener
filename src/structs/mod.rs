@@ -175,6 +175,7 @@ impl Fontgarden {
                                 ufo_layer.insert_glyph(glyph.clone());
                             }
                         }
+                        // TODO: test renaming with mutatorsans
                         ufo.layers
                             .rename_layer(
                                 &ufo.layers.default_layer().name().clone(),
@@ -183,8 +184,6 @@ impl Fontgarden {
                             )
                             .unwrap();
                     } else {
-                        // TODO: make and deal with default layer
-                        // TODO: always make default layer, but skip empty misc layers
                         match ufo.layers.get_mut(layer_name) {
                             Some(ufo_layer) => {
                                 for glyph in layer_glyphs {
@@ -377,6 +376,7 @@ mod tests {
                 .unwrap();
             let mut ufo_glyph_names: HashSet<Name> = font.iter_names().collect();
 
+            // TODO: Make small inside-test list
             for set_path in ["Latin.txt", "Cyrillic.txt", "Greek.txt"] {
                 let set_name = Name::new(set_path.split('.').next().unwrap()).unwrap();
                 let set_list = crate::util::load_glyph_list(&tmp_path.join(set_path)).unwrap();

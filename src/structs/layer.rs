@@ -82,10 +82,15 @@ impl Layer {
         if self.glyphs.is_empty() {
             return;
         }
-        let layer_path = source_path.join(default_file_name_for_layer_name(
-            layer_name,
-            &HashSet::new(),
-        ));
+        let layer_path = if self.default {
+            source_path.join("glyphs")
+        } else {
+            source_path.join(default_file_name_for_layer_name(
+                layer_name,
+                // TODO: Keep track of existing layer names.
+                &HashSet::new(),
+            ))
+        };
         create_dir(&layer_path).expect("can't create layer dir");
 
         let layerinfo = LayerInfo {
