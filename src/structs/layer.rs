@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::fs::create_dir;
 use std::fs::read_dir;
 use std::path::Path;
@@ -24,8 +25,6 @@ pub struct Layer {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct LayerInfo {
     pub name: Name,
-    #[serde(default)]
-    pub default: bool,
 }
 
 impl Layer {
@@ -36,9 +35,8 @@ impl Layer {
             plist::from_file(path.join("layerinfo.plist")).expect("can't load layerinfo");
 
         for entry in read_dir(path)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_file() && path.extension().map(|n| n == "glif").unwrap_or(false) {
+            let path = entry?.path();
+            if path.is_file() && path.extension().map_or(false, |n| n == "glif") {
                 let glif = norad::Glyph::load(&path).expect("can't load glif");
                 glyphs.insert(glif.name.clone(), glif);
             }
@@ -48,7 +46,7 @@ impl Layer {
             Layer {
                 glyphs,
                 color_marks,
-                default: layerinfo.default,
+                default: path.file_name() == Some(OsStr::new("glyphs")),
             },
             layerinfo,
         ))
@@ -78,34 +76,41 @@ impl Layer {
         }
     }
 
-    pub(crate) fn save(&self, layer_name: &Name, source_path: &Path) {
+    pub(crate) fn save(
+        &self,
+        layer_name: &Name,
+        source_path: &Path,
+        existing_layer_names: &mut HashSet<String>,
+    ) {
         if self.glyphs.is_empty() {
             return;
         }
         let layer_path = if self.default {
             source_path.join("glyphs")
         } else {
-            source_path.join(default_file_name_for_layer_name(
+            let path = source_path.join(default_file_name_for_layer_name(
                 layer_name,
-                // TODO: Keep track of existing layer names.
-                &HashSet::new(),
-            ))
+                existing_layer_names,
+            ));
+            existing_layer_names.insert(path.to_string_lossy().to_string());
+            path
         };
         create_dir(&layer_path).expect("can't create layer dir");
 
-        let layerinfo = LayerInfo {
-            name: layer_name.clone(),
-            default: self.default,
-        };
-        plist::to_file_xml(layer_path.join("layerinfo.plist"), &layerinfo)
-            .expect("can't write layerinfo");
+        plist::to_file_xml(
+            layer_path.join("layerinfo.plist"),
+            &LayerInfo {
+                name: layer_name.clone(),
+            },
+        )
+        .expect("can't write layerinfo");
 
-        let mut filenames = HashSet::new();
+        let mut existing_glyph_names = HashSet::new();
         for (glyph_name, glyph) in &self.glyphs {
-            let filename = default_file_name_for_glyph_name(glyph_name, &filenames);
+            let filename = default_file_name_for_glyph_name(glyph_name, &existing_glyph_names);
             let glyph_path = layer_path.join(&filename);
             glyph.save(&glyph_path).expect("can't write glif file");
-            filenames.insert(filename.to_string_lossy().to_string());
+            existing_glyph_names.insert(filename.to_string_lossy().to_string());
         }
 
         write_color_marks(&layer_path.join("color_marks.csv"), &self.color_marks);

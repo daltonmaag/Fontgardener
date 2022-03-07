@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{create_dir, read_dir};
 use std::path::Path;
 
@@ -20,20 +20,17 @@ impl Source {
         for entry in read_dir(path)? {
             let entry = entry?;
             let path = entry.path();
+            let file_name = path.file_name().expect("can't read file name");
             let metadata = entry.metadata()?;
             if metadata.is_dir()
-                && path.file_name().map_or(false, |n| {
-                    n == "glyphs" || n.to_string_lossy().starts_with("glyphs.")
-                })
+                && (file_name == "glyphs" || file_name.to_string_lossy().starts_with("glyphs."))
             {
                 let (layer, layerinfo) = Layer::from_path(&path)?;
-                // TODO: when glyph dir name == "glyphs", assert default layer?
-                if layerinfo.default {
-                    if !found_default {
-                        found_default = true;
-                    } else {
-                        return Err(LoadError::DuplicateDefaultLayer);
-                    }
+                // All non-default layer names start with a dot after "glyphs".
+                // Hope that we don't bump into filesystem case-sensitivity
+                // issues.
+                if file_name == "glyphs" {
+                    found_default = true;
                 }
                 layers.insert(layerinfo.name, layer);
             }
@@ -49,8 +46,9 @@ impl Source {
     pub(crate) fn save(&self, source_name: &str, set_path: &Path) {
         let source_path = set_path.join(format!("source.{source_name}"));
         create_dir(&source_path).expect("can't create source dir");
+        let mut existing_layer_names = HashSet::new();
         for (layer_name, layer) in &self.layers {
-            layer.save(layer_name, &source_path);
+            layer.save(layer_name, &source_path, &mut existing_layer_names);
         }
     }
 }

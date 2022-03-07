@@ -50,8 +50,6 @@ pub enum LoadError {
     DuplicateGlyph,
     #[error("no default layer for source found")]
     NoDefaultLayer,
-    #[error("duplicate default layer for source found")]
-    DuplicateDefaultLayer,
 }
 
 #[derive(thiserror::Error, Debug)]
