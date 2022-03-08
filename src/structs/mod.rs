@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     path::Path,
 };
 
@@ -13,15 +13,19 @@ mod layer;
 mod metadata;
 mod source;
 
+/// The top-level Fontgarden structure.
+///
+/// Note: BTreeMaps are used just to make testing easier, as they are ordered
+/// and will output a deterministic debug string for textual diffing.
 #[derive(Debug, Default, PartialEq)]
 pub struct Fontgarden {
-    pub sets: HashMap<Name, Set>,
+    pub sets: BTreeMap<Name, Set>,
 }
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Set {
-    pub glyph_data: HashMap<Name, GlyphRecord>,
-    pub sources: HashMap<Name, Source>,
+    pub glyph_data: BTreeMap<Name, GlyphRecord>,
+    pub sources: BTreeMap<Name, Source>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -141,8 +145,8 @@ impl Fontgarden {
         set_names: &HashSet<Name>,
         glyph_names: &HashSet<Name>,
         source_names: &HashSet<Name>,
-    ) -> Result<HashMap<Name, norad::Font>, ExportError> {
-        let mut ufos: HashMap<Name, norad::Font> = HashMap::new();
+    ) -> Result<BTreeMap<Name, norad::Font>, ExportError> {
+        let mut ufos: BTreeMap<Name, norad::Font> = BTreeMap::new();
 
         for (_, set) in self
             .sets
@@ -211,7 +215,7 @@ impl Set {
     fn from_path(path: &Path) -> Result<Self, LoadError> {
         let glyph_data = metadata::load_glyph_data(&path.join("glyph_data.csv"));
 
-        let mut sources = HashMap::new();
+        let mut sources = BTreeMap::new();
         for entry in std::fs::read_dir(path)? {
             let entry = entry?;
             let path = entry.path();
@@ -266,7 +270,7 @@ mod tests {
 
     use super::*;
 
-    const NOTO_TEMP: &str = r"C:\Users\nikolaus.waxweiler\AppData\Local\Dev\nototest";
+    // const NOTO_TEMP: &str = r"C:\Users\nikolaus.waxweiler\AppData\Local\Dev\nototest";
 
     #[test]
     fn load_empty() {
@@ -280,126 +284,94 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip() {
-        let mut fontgarden = Fontgarden::new();
-
-        let tmp_path = Path::new(NOTO_TEMP);
-
-        let latin_glyphs: HashSet<Name> = HashSet::from(
-            ["A", "B", "Adieresis", "dieresiscomb", "dieresis"].map(|v| Name::new(v).unwrap()),
-        );
-        let latin_set_name = Name::new("Latin").unwrap();
-
-        let ufo1 = norad::Font::load(tmp_path.join("NotoSans-Light.ufo")).unwrap();
-        let ufo2 = norad::Font::load(tmp_path.join("NotoSans-Bold.ufo")).unwrap();
-
-        fontgarden
-            .import(
-                &ufo1,
-                &latin_glyphs,
-                &latin_set_name,
-                &Name::new("Light").unwrap(),
-            )
-            .unwrap();
-        fontgarden
-            .import(
-                &ufo2,
-                &latin_glyphs,
-                &latin_set_name,
-                &Name::new("Bold").unwrap(),
-            )
-            .unwrap();
-
-        let greek_glyphs: HashSet<Name> = HashSet::from(
-            ["Alpha", "Alphatonos", "tonos.case", "tonos"].map(|v| Name::new(v).unwrap()),
-        );
-        let greek_set_name = Name::new("Greek").unwrap();
-
-        fontgarden
-            .import(
-                &ufo1,
-                &greek_glyphs,
-                &greek_set_name,
-                &Name::new("Light").unwrap(),
-            )
-            .unwrap();
-        fontgarden
-            .import(
-                &ufo2,
-                &greek_glyphs,
-                &greek_set_name,
-                &Name::new("Bold").unwrap(),
-            )
-            .unwrap();
-
-        let tempdir = tempfile::TempDir::new().unwrap();
-        let fg_path = tempdir.path().join("test2.fontgarden");
-        fontgarden.save(&fg_path);
-        let fontgarden2 = Fontgarden::from_path(&fg_path).unwrap();
-
-        assert_eq!(fontgarden, fontgarden2);
-    }
-
-    #[test]
-    fn roundtrip_big() {
-        let tmp_path = Path::new(NOTO_TEMP);
+    fn roundtrip_mutatorsans() {
         let mut fontgarden = Fontgarden::new();
 
         let ufo_paths = [
-            "NotoSans-Bold.ufo",
-            "NotoSans-Condensed.ufo",
-            "NotoSans-CondensedBold.ufo",
-            "NotoSans-CondensedLight.ufo",
-            "NotoSans-CondensedSemiBold.ufo",
-            "NotoSans-DisplayBold.ufo",
-            "NotoSans-DisplayBoldCondensed.ufo",
-            "NotoSans-DisplayCondensed.ufo",
-            "NotoSans-DisplayLight.ufo",
-            "NotoSans-DisplayLightCondensed.ufo",
-            "NotoSans-DisplayRegular.ufo",
-            "NotoSans-DisplaySemiBold.ufo",
-            "NotoSans-DisplaySemiBoldCondensed.ufo",
-            "NotoSans-Light.ufo",
-            "NotoSans-Regular.ufo",
-            "NotoSans-SemiBold.ufo",
+            "testdata/MutatorSansLightWide.ufo",
+            "testdata/MutatorSansLightCondensed.ufo",
         ];
 
+        let latin_set: HashSet<Name> = ["A", "Aacute", "S"]
+            .iter()
+            .map(|n| Name::new(n).unwrap())
+            .collect();
+
+        let punctuation_set: HashSet<Name> = ["quotedblbase", "quotedblleft", "comma"]
+            .iter()
+            .map(|n| Name::new(n).unwrap())
+            .collect();
+
+        let arrow_set: HashSet<Name> = ["arrowleft"]
+            .iter()
+            .map(|n| Name::new(n).unwrap())
+            .collect();
+
+        let default_set: HashSet<Name> = ["acute"].iter().map(|n| Name::new(n).unwrap()).collect();
+
         for ufo_path in ufo_paths {
-            let font = norad::Font::load(tmp_path.join(ufo_path)).unwrap();
+            let font = norad::Font::load(ufo_path).unwrap();
             let source_name = font
                 .font_info
                 .style_name
                 .as_ref()
                 .map(|v| Name::new(v).unwrap())
                 .unwrap();
-            let mut ufo_glyph_names: HashSet<Name> = font.iter_names().collect();
 
-            // TODO: Make small inside-test list
-            for set_path in ["Latin.txt", "Cyrillic.txt", "Greek.txt"] {
-                let set_name = Name::new(set_path.split('.').next().unwrap()).unwrap();
-                let set_list = crate::util::load_glyph_list(&tmp_path.join(set_path)).unwrap();
+            fontgarden
+                .import(
+                    &font,
+                    &latin_set,
+                    &Name::new("Latin").unwrap(),
+                    &source_name,
+                )
+                .unwrap();
 
-                fontgarden
-                    .import(&font, &set_list, &set_name, &source_name)
-                    .unwrap();
-                ufo_glyph_names.retain(|n| !set_list.contains(n));
-            }
+            fontgarden
+                .import(
+                    &font,
+                    &arrow_set,
+                    &Name::new("Arrows").unwrap(),
+                    &source_name,
+                )
+                .unwrap();
 
-            // Put remaining glyphs into default set.
-            if !ufo_glyph_names.is_empty() {
-                let set_name = Name::new("default").unwrap();
-                fontgarden
-                    .import(&font, &ufo_glyph_names, &set_name, &source_name)
-                    .unwrap();
+            fontgarden
+                .import(
+                    &font,
+                    &punctuation_set,
+                    &Name::new("Punctuation").unwrap(),
+                    &source_name,
+                )
+                .unwrap();
+
+            fontgarden
+                .import(
+                    &font,
+                    &default_set,
+                    &Name::new("default").unwrap(),
+                    &source_name,
+                )
+                .unwrap();
+        }
+
+        for set in fontgarden.sets.values() {
+            for source in set.sources.values() {
+                for (layer_name, layer) in &source.layers {
+                    if layer_name.as_ref() == "foreground" {
+                        assert!(layer.default)
+                    } else {
+                        assert!(!layer.default)
+                    }
+                }
             }
         }
 
-        // let tempdir = tempfile::TempDir::new().unwrap();
-        // let fg_path = tempdir.path().join("test3.fontgarden");
-        let fg_path = tmp_path.join("test3.fontgarden");
-        fontgarden.save(&fg_path);
-        let fontgarden2 = Fontgarden::from_path(&fg_path).unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        fontgarden.save(tempdir.path());
+        let fontgarden2 = Fontgarden::from_path(tempdir.path()).unwrap();
 
+        use pretty_assertions::assert_eq;
         assert_eq!(fontgarden, fontgarden2);
     }
 }

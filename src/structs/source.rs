@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fs::{create_dir, read_dir};
 use std::path::Path;
 
@@ -9,12 +9,12 @@ use super::LoadError;
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Source {
-    pub layers: HashMap<Name, Layer>,
+    pub layers: BTreeMap<Name, Layer>,
 }
 
 impl Source {
     pub(crate) fn from_path(path: &Path) -> Result<Self, LoadError> {
-        let mut layers = HashMap::new();
+        let mut layers = BTreeMap::new();
         let mut found_default = false;
 
         for entry in read_dir(path)? {

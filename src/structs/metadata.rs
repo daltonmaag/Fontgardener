@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::Path;
 
@@ -6,8 +6,8 @@ use super::GlyphRecord;
 use norad::Color;
 use norad::Name;
 
-pub(crate) fn load_glyph_data(path: &Path) -> HashMap<Name, GlyphRecord> {
-    let mut glyph_data = HashMap::new();
+pub(crate) fn load_glyph_data(path: &Path) -> BTreeMap<Name, GlyphRecord> {
+    let mut glyph_data = BTreeMap::new();
     let mut reader = csv::Reader::from_path(path).expect("can't open glyph_data.csv");
 
     type Record = (String, Option<String>, Option<String>, Option<String>, bool);
@@ -36,10 +36,8 @@ fn parse_codepoints(v: &str) -> Vec<char> {
         .collect()
 }
 
-pub(crate) fn write_glyph_data(glyph_data: &HashMap<Name, GlyphRecord>, path: &Path) {
+pub(crate) fn write_glyph_data(glyph_data: &BTreeMap<Name, GlyphRecord>, path: &Path) {
     let glyph_data_csv_file = File::create(&path).expect("can't create glyph_data.csv");
-    let mut glyph_data_keys: Vec<_> = glyph_data.keys().collect();
-    glyph_data_keys.sort();
 
     let mut writer = csv::Writer::from_writer(glyph_data_csv_file);
     writer
@@ -51,7 +49,8 @@ pub(crate) fn write_glyph_data(glyph_data: &HashMap<Name, GlyphRecord>, path: &P
             "export",
         ])
         .expect("can't write csv");
-    for glyph_name in glyph_data_keys {
+
+    for glyph_name in glyph_data.keys() {
         let record = &glyph_data[glyph_name];
         let codepoints_str: String = record
             .codepoints
@@ -72,8 +71,8 @@ pub(crate) fn write_glyph_data(glyph_data: &HashMap<Name, GlyphRecord>, path: &P
     writer.flush().expect("can't flush csv");
 }
 
-pub(crate) fn load_color_marks(path: &Path) -> HashMap<Name, Color> {
-    let mut color_marks = HashMap::new();
+pub(crate) fn load_color_marks(path: &Path) -> BTreeMap<Name, Color> {
+    let mut color_marks = BTreeMap::new();
 
     if !path.exists() {
         return color_marks;
@@ -87,7 +86,7 @@ pub(crate) fn load_color_marks(path: &Path) -> HashMap<Name, Color> {
     color_marks
 }
 
-pub(crate) fn write_color_marks(path: &Path, color_marks: &HashMap<Name, Color>) {
+pub(crate) fn write_color_marks(path: &Path, color_marks: &BTreeMap<Name, Color>) {
     let mut writer = csv::Writer::from_path(&path).expect("can't open color_marks.csv");
     writer
         .write_record(&["name", "color"])

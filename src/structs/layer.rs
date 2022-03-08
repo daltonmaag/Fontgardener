@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs::create_dir;
@@ -17,8 +17,8 @@ use super::LoadError;
 
 #[derive(Debug, PartialEq)]
 pub struct Layer {
-    pub glyphs: HashMap<Name, norad::Glyph>,
-    pub color_marks: HashMap<Name, norad::Color>,
+    pub glyphs: BTreeMap<Name, norad::Glyph>,
+    pub color_marks: BTreeMap<Name, norad::Color>,
     pub default: bool,
 }
 
@@ -29,7 +29,7 @@ pub struct LayerInfo {
 
 impl Layer {
     pub(crate) fn from_path(path: &Path) -> Result<(Self, LayerInfo), LoadError> {
-        let mut glyphs = HashMap::new();
+        let mut glyphs = BTreeMap::new();
         let color_marks = load_color_marks(&path.join("color_marks.csv"));
         let layerinfo: LayerInfo =
             plist::from_file(path.join("layerinfo.plist")).expect("can't load layerinfo");
@@ -53,8 +53,8 @@ impl Layer {
     }
 
     pub(crate) fn from_ufo_layer(layer: &norad::Layer, glyph_names: &HashSet<Name>) -> Self {
-        let mut glyphs = HashMap::new();
-        let mut color_marks = HashMap::new();
+        let mut glyphs = BTreeMap::new();
+        let mut color_marks = BTreeMap::new();
 
         for glyph in layer
             .iter()
@@ -62,7 +62,10 @@ impl Layer {
         {
             let mut our_glyph = glyph.clone();
             if let Some(color_string) = our_glyph.lib.remove("public.markColor") {
+                // FIXME: We roundtrip color here so that we round up front to
+                // make roundtrip equality testing easier.
                 let our_color = Color::from_str(color_string.as_string().unwrap()).unwrap();
+                let our_color = Color::from_str(&our_color.to_rgba_string()).unwrap();
                 color_marks.insert(glyph.name.clone(), our_color);
             }
             // TODO: split out the codepoints.
