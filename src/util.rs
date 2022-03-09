@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     path::Path,
 };
 
@@ -10,8 +10,8 @@ use crate::structs::*;
 pub(crate) fn extract_glyph_data(
     font: &norad::Font,
     glyphs: &HashSet<Name>,
-) -> HashMap<Name, GlyphRecord> {
-    let mut glyph_data: HashMap<Name, GlyphRecord> = HashMap::new();
+) -> BTreeMap<Name, GlyphRecord> {
+    let mut glyph_data: BTreeMap<Name, GlyphRecord> = BTreeMap::new();
 
     let postscript_names = match font.lib.get("public.postscriptNames") {
         Some(v) => v.as_dictionary().unwrap().clone(),
