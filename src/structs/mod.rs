@@ -177,7 +177,6 @@ impl Fontgarden {
                                 ufo_layer.insert_glyph(glyph.clone());
                             }
                         }
-                        // TODO: test renaming with mutatorsans
                         ufo.layers
                             .rename_layer(
                                 &ufo.layers.default_layer().name().clone(),
