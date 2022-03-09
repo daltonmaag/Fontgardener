@@ -265,11 +265,7 @@ impl Set {
 
 #[cfg(test)]
 mod tests {
-    // use pretty_assertions::assert_eq;
-
     use super::*;
-
-    // const NOTO_TEMP: &str = r"C:\Users\nikolaus.waxweiler\AppData\Local\Dev\nototest";
 
     #[test]
     fn load_empty() {
