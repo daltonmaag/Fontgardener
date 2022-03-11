@@ -7,12 +7,34 @@ use norad::Name;
 use super::layer::Layer;
 use super::LoadError;
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Source {
     pub layers: BTreeMap<Name, Layer>,
 }
 
+impl Default for Source {
+    fn default() -> Self {
+        let layer = Layer {
+            default: true,
+            ..Default::default()
+        };
+        Self {
+            layers: BTreeMap::from([(Name::new("public.default").unwrap(), layer)]),
+        }
+    }
+}
+
 impl Source {
+    pub fn new_with_default_layer_name(name: Name) -> Self {
+        let layer = Layer {
+            default: true,
+            ..Default::default()
+        };
+        Self {
+            layers: BTreeMap::from([(name, layer)]),
+        }
+    }
+
     pub(crate) fn from_path(path: &Path) -> Result<Self, LoadError> {
         let mut layers = BTreeMap::new();
         let mut found_default = false;
@@ -50,5 +72,16 @@ impl Source {
         for (layer_name, layer) in &self.layers {
             layer.save(layer_name, &source_path, &mut existing_layer_names);
         }
+    }
+
+    pub fn get_default_layer_mut(&mut self) -> &mut Layer {
+        self.layers
+            .values_mut()
+            .find(|layer| layer.default)
+            .unwrap()
+    }
+
+    pub fn get_or_create_layer(&mut self, name: Name) -> &mut Layer {
+        self.layers.entry(name).or_default()
     }
 }

@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     path::Path,
 };
 
@@ -112,6 +112,10 @@ impl Fontgarden {
         }
     }
 
+    /// Import glyphs from a UFO into the Fontgarden.
+    ///
+    /// Strategy: for each imported glyph, if the name already exists in some
+    /// set, import it there, else import it into `set_name`.
     pub fn import(
         &mut self,
         font: &norad::Font,
@@ -119,23 +123,63 @@ impl Fontgarden {
         set_name: &Name,
         source_name: &Name,
     ) -> Result<(), LoadError> {
-        let set = self.sets.entry(set_name.clone()).or_default();
-        let source = set.sources.entry(source_name.clone()).or_default();
+        let mut glyph_data = crate::util::extract_glyph_data(font, glyphs);
 
-        // TODO: check for glyph uniqueness per set
-        // TODO: follow components and check if they are present in another set
-        let glyph_data = crate::util::extract_glyph_data(font, glyphs);
-        set.glyph_data.extend(glyph_data);
+        // Check if some glyphs are already in other sets so we can route them
+        // there. Fresh glyphs without an entry can then go into `set_name`.
+        let mut glyphs_leftovers = glyphs.clone();
+        let mut set_to_glyphs: HashMap<Name, HashSet<Name>> = HashMap::new();
+        for (set_name, set) in &self.sets {
+            let coverage = set.glyph_coverage();
+            let intersection: HashSet<Name> = coverage.intersection(glyphs).cloned().collect();
+            if intersection.is_empty() {
+                continue;
+            }
+            glyphs_leftovers.retain(|n| !intersection.contains(n));
+            set_to_glyphs.insert(set_name.clone(), intersection);
+        }
+        if !glyphs_leftovers.is_empty() {
+            set_to_glyphs.insert(set_name.clone(), glyphs_leftovers);
+        }
 
-        for layer in font.iter_layers() {
-            let mut our_layer = Layer::from_ufo_layer(layer, glyphs);
-            if layer == font.default_layer() {
-                our_layer.default = true;
-                source.layers.insert(layer.name().clone(), our_layer);
-            } else if !our_layer.glyphs.is_empty() {
-                source.layers.insert(layer.name().clone(), our_layer);
+        for (set_name, glyph_names) in set_to_glyphs {
+            let set = self.sets.entry(set_name.clone()).or_default();
+            for name in &glyph_names {
+                if let Some((key, value)) = glyph_data.remove_entry(name) {
+                    set.glyph_data.insert(key, value);
+                }
+            }
+
+            let source = set.sources.entry(source_name.clone()).or_insert_with(|| {
+                Source::new_with_default_layer_name(font.default_layer().name().clone())
+            });
+            assert_eq!(source.layers.len(), 1);
+            assert!(source.layers.values().next().unwrap().default);
+
+            for layer in font.iter_layers() {
+                let our_layer = Layer::from_ufo_layer(layer, &glyph_names);
+                if our_layer.glyphs.is_empty() {
+                    continue;
+                }
+
+                let target_layer = if layer == font.default_layer() {
+                    source.get_default_layer_mut()
+                } else {
+                    source.get_or_create_layer(layer.name().clone())
+                };
+
+                target_layer.glyphs.extend(our_layer.glyphs);
+                target_layer.color_marks.extend(our_layer.color_marks);
             }
         }
+
+        // TODO: Import glyphs used as components by glyphs on the import list
+        // automatically (recursively follow the graph).
+
+        // TODO: Check incoming composites with components outside the import
+        // set name: are they different? If so, warn the user. E.g. you import
+        // A-cy into Cyrl and the underlying A is different from the A in the
+        // import font. Again track diffs recursively in nested composites.
 
         Ok(())
     }
@@ -158,9 +202,7 @@ impl Fontgarden {
                 .iter()
                 .filter(|(name, _)| source_names.contains(*name))
             {
-                let ufo = ufos
-                    .entry(source_name.clone())
-                    .or_insert_with(norad::Font::new);
+                let ufo = ufos.entry(source_name.clone()).or_default();
                 for (layer_name, layer) in &source.layers {
                     let layer_glyphs: Vec<_> = layer
                         .glyphs
@@ -350,6 +392,11 @@ mod tests {
                 .unwrap();
         }
 
+        // let tempdir = tempfile::tempdir().unwrap();
+        let tempdir = std::env::temp_dir().join("testms.fontgarden");
+        fontgarden.save(&tempdir);
+        let fontgarden2 = Fontgarden::from_path(&tempdir).unwrap();
+
         for set in fontgarden.sets.values() {
             for source in set.sources.values() {
                 for (layer_name, layer) in &source.layers {
@@ -361,10 +408,6 @@ mod tests {
                 }
             }
         }
-
-        let tempdir = tempfile::tempdir().unwrap();
-        fontgarden.save(tempdir.path());
-        let fontgarden2 = Fontgarden::from_path(tempdir.path()).unwrap();
 
         use pretty_assertions::assert_eq;
         assert_eq!(fontgarden, fontgarden2);
