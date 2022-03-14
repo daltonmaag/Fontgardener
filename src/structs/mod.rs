@@ -35,7 +35,6 @@ pub struct GlyphRecord {
     pub codepoints: Vec<char>,
     // TODO: Make an enum
     pub opentype_category: Option<String>,
-    // TODO: Write fn default that sets true here
     #[serde(default = "default_true")]
     pub export: bool,
 }
