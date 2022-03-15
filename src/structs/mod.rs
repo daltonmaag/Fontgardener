@@ -510,4 +510,97 @@ mod tests {
             assert_eq!(reference_glyphs, other_glyphs);
         }
     }
+
+    #[test]
+    fn update_sets() {
+        let mut fontgarden = Fontgarden::new();
+
+        let mut ufo_lightwide = norad::Font::load("testdata/MutatorSansLightWide.ufo").unwrap();
+        let mut ufo_lightcond =
+            norad::Font::load("testdata/MutatorSansLightCondensed.ufo").unwrap();
+
+        // TODO: compare glyphs differently so color marks don't matter.
+        for ufo in [&mut ufo_lightwide, &mut ufo_lightcond] {
+            let layer_names: Vec<_> = ufo.layers.iter().map(|l| l.name()).cloned().collect();
+            for layer_name in layer_names {
+                let layer = ufo.layers.get_mut(&layer_name).unwrap();
+                for glyph in layer.iter_mut() {
+                    glyph.lib.remove("public.markColor");
+                }
+            }
+        }
+
+        let name_latin = Name::new("Latin").unwrap();
+        let name_default = Name::new("default").unwrap();
+        let name_a = Name::new("A").unwrap();
+        let name_arrowleft = Name::new("arrowleft").unwrap();
+
+        let latin_set = HashSet::from([name_a]);
+        let default_set = HashSet::from([name_arrowleft]);
+
+        for font in [&ufo_lightwide, &ufo_lightcond] {
+            let source_name = font
+                .font_info
+                .style_name
+                .as_ref()
+                .map(|v| Name::new(v).unwrap())
+                .unwrap();
+
+            fontgarden
+                .import(font, &latin_set, &name_latin, &source_name)
+                .unwrap();
+            fontgarden
+                .import(font, &default_set, &name_default, &source_name)
+                .unwrap();
+        }
+
+        assert_eq!(
+            &fontgarden.sets["Latin"].sources["LightWide"].layers["foreground"].glyphs["A"],
+            ufo_lightwide.get_glyph("A").unwrap()
+        );
+        assert_eq!(
+            &fontgarden.sets["default"].sources["LightCondensed"].layers["foreground"].glyphs
+                ["arrowleft"],
+            ufo_lightcond.get_glyph("arrowleft").unwrap()
+        );
+
+        ufo_lightwide
+            .get_glyph_mut("A")
+            .unwrap()
+            .lib
+            .insert("aaaa".into(), 1.into());
+        ufo_lightcond
+            .get_glyph_mut("arrowleft")
+            .unwrap()
+            .lib
+            .insert("bbbb".into(), 1.into());
+
+        for font in [&ufo_lightwide, &ufo_lightcond] {
+            let source_name = font
+                .font_info
+                .style_name
+                .as_ref()
+                .map(|v| Name::new(v).unwrap())
+                .unwrap();
+
+            fontgarden
+                .import(
+                    font,
+                    &latin_set.union(&default_set).cloned().collect(),
+                    &name_latin,
+                    &source_name,
+                )
+                .unwrap();
+        }
+
+        assert_eq!(
+            &fontgarden.sets["Latin"].sources["LightWide"].layers["foreground"].glyphs["A"],
+            ufo_lightwide.get_glyph("A").unwrap()
+        );
+        assert_eq!(
+            &fontgarden.sets["default"].sources["LightCondensed"].layers["foreground"].glyphs
+                ["arrowleft"],
+            ufo_lightcond.get_glyph("arrowleft").unwrap()
+        );
+    }
 }
