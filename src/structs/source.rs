@@ -9,6 +9,8 @@ use super::LoadError;
 
 #[derive(Debug, PartialEq)]
 pub struct Source {
+    // TODO: UFO layers are ordered, export from here will always sort order.
+    // Relevant other than in testing?
     pub layers: BTreeMap<Name, Layer>,
 }
 

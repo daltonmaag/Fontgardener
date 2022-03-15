@@ -152,8 +152,7 @@ impl Fontgarden {
             let source = set.sources.entry(source_name.clone()).or_insert_with(|| {
                 Source::new_with_default_layer_name(font.default_layer().name().clone())
             });
-            assert_eq!(source.layers.len(), 1);
-            assert!(source.layers.values().next().unwrap().default);
+            assert_eq!(source.layers.values().filter(|l| l.default).count(), 1);
 
             for layer in font.iter_layers() {
                 let our_layer = Layer::from_ufo_layer(layer, &glyph_names);
@@ -215,16 +214,27 @@ impl Fontgarden {
                         {
                             let ufo_layer = ufo.layers.default_layer_mut();
                             for glyph in layer_glyphs {
-                                ufo_layer.insert_glyph(glyph.clone());
+                                let mut new_glyph = glyph.clone();
+                                // TODO: dedicated export function for layer glyphs
+                                if let Some(c) = layer.color_marks.get(&glyph.name) {
+                                    new_glyph.lib.insert(
+                                        "public.markColor".into(),
+                                        c.to_rgba_string().into(),
+                                    );
+                                }
+                                ufo_layer.insert_glyph(new_glyph);
                             }
                         }
-                        ufo.layers
-                            .rename_layer(
-                                &ufo.layers.default_layer().name().clone(),
-                                layer_name,
-                                false,
-                            )
-                            .unwrap();
+                        // TODO: be smarter about naming default layers?
+                        if layer_name != ufo.layers.default_layer_mut().name() {
+                            ufo.layers
+                                .rename_layer(
+                                    &ufo.layers.default_layer().name().clone(),
+                                    layer_name,
+                                    false,
+                                )
+                                .unwrap();
+                        }
                     } else {
                         match ufo.layers.get_mut(layer_name) {
                             Some(ufo_layer) => {
@@ -306,6 +316,10 @@ impl Set {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
+    use norad::Color;
+
     use super::*;
 
     #[test]
@@ -391,10 +405,9 @@ mod tests {
                 .unwrap();
         }
 
-        // let tempdir = tempfile::tempdir().unwrap();
-        let tempdir = std::env::temp_dir().join("testms.fontgarden");
-        fontgarden.save(&tempdir);
-        let fontgarden2 = Fontgarden::from_path(&tempdir).unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        fontgarden.save(tempdir.path());
+        let fontgarden2 = Fontgarden::from_path(tempdir.path()).unwrap();
 
         for set in fontgarden.sets.values() {
             for source in set.sources.values() {
@@ -410,5 +423,91 @@ mod tests {
 
         use pretty_assertions::assert_eq;
         assert_eq!(fontgarden, fontgarden2);
+    }
+
+    #[test]
+    fn roundtrip_mutatorsans_export_import() {
+        let mut fontgarden = Fontgarden::new();
+
+        let mut ufo_lightwide = norad::Font::load("testdata/MutatorSansLightWide.ufo").unwrap();
+        let mut ufo_lightcond =
+            norad::Font::load("testdata/MutatorSansLightCondensed.ufo").unwrap();
+
+        // TODO: find workaround for equality testing color accuracy.
+        for ufo in [&mut ufo_lightwide, &mut ufo_lightcond] {
+            let layer_names: Vec<_> = ufo.layers.iter().map(|l| l.name()).cloned().collect();
+            for layer_name in layer_names {
+                let layer = ufo.layers.get_mut(&layer_name).unwrap();
+                for glyph in layer.iter_mut() {
+                    if let Some(color_string) = glyph.lib.remove("public.markColor") {
+                        // FIXME: We roundtrip color here so that we round up front to
+                        // make roundtrip equality testing easier.
+                        let our_color = Color::from_str(color_string.as_string().unwrap()).unwrap();
+                        let our_color = Color::from_str(&our_color.to_rgba_string()).unwrap();
+                        glyph
+                            .lib
+                            .insert("public.markColor".into(), our_color.to_rgba_string().into());
+                    }
+                }
+            }
+        }
+
+        let name_latin = Name::new("Latin").unwrap();
+        let name_default = Name::new("default").unwrap();
+
+        let latin_set: HashSet<Name> = ["A", "Aacute", "S"]
+            .iter()
+            .map(|n| Name::new(n).unwrap())
+            .collect();
+
+        let mut glyph_names = HashSet::new();
+        let mut source_names = HashSet::new();
+        for font in [&ufo_lightwide, &ufo_lightcond] {
+            let source_name = font
+                .font_info
+                .style_name
+                .as_ref()
+                .map(|v| Name::new(v).unwrap())
+                .unwrap();
+            glyph_names.extend(font.iter_names());
+            source_names.insert(source_name.clone());
+
+            fontgarden
+                .import(font, &latin_set, &name_latin, &source_name)
+                .unwrap();
+
+            fontgarden
+                .import(
+                    font,
+                    &HashSet::from_iter(font.iter_names())
+                        .difference(&latin_set)
+                        .cloned()
+                        .collect(),
+                    &name_default,
+                    &source_name,
+                )
+                .unwrap();
+        }
+
+        let roundtripped_ufos = fontgarden
+            .export(
+                &HashSet::from_iter([name_latin, name_default].iter().cloned()),
+                &glyph_names,
+                &source_names,
+            )
+            .unwrap();
+
+        assert_font_eq(&ufo_lightwide, &roundtripped_ufos["LightWide"]);
+        assert_font_eq(&ufo_lightcond, &roundtripped_ufos["LightCondensed"]);
+    }
+
+    fn assert_font_eq(reference: &norad::Font, other: &norad::Font) {
+        // TODO: compare more than glyphs.
+        for reference_layer in reference.layers.iter() {
+            let reference_glyphs: Vec<_> = reference_layer.iter().collect();
+            let other_layer = other.layers.get(reference_layer.name()).unwrap();
+            let other_glyphs: Vec<_> = other_layer.iter().collect();
+            assert_eq!(reference_glyphs, other_glyphs);
+        }
     }
 }
