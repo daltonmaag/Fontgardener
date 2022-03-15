@@ -33,13 +33,11 @@ enum Commands {
         #[clap(long, default_value = "default")]
         set_name: Name,
 
-        /// Source to import glyphs into [default: infer from style name].
-        #[clap(long)]
-        source_name: Option<Name>,
-
+        // TODO: Add switch for selecting source names, i.e. in (font, source name)
+        // pairs?
         /// Unified Font Object (UFO) to import from.
         #[clap(parse(from_os_str))]
-        font: PathBuf,
+        fonts: Vec<PathBuf>,
     },
     Export {
         /// Fontgarden package path to export from.
@@ -76,26 +74,26 @@ fn main() {
             fontgarden_path,
             glyph_names_file,
             set_name,
-            source_name,
-            font,
+            fonts,
         } => {
             let mut fontgarden =
                 structs::Fontgarden::from_path(fontgarden_path).expect("can't load fontgarden");
             let import_glyphs =
                 util::load_glyph_list(glyph_names_file).expect("can't load glyphs file");
-            let font = norad::Font::load(&font).expect("can't load font");
-            let source_name_font = font
-                .font_info
-                .style_name
-                .as_ref()
-                .map(|v| Name::new(v).unwrap());
-            let source_name = source_name
-                .as_ref()
-                .or(source_name_font.as_ref())
-                .expect("can't determine source name to import into");
-            fontgarden
-                .import(&font, &import_glyphs, set_name, source_name)
-                .expect("can't import font");
+
+            for font in fonts {
+                let font = norad::Font::load(&font).expect("can't load font");
+                let source_name = font
+                    .font_info
+                    .style_name
+                    .as_ref()
+                    .map(|v| Name::new(v).unwrap())
+                    .expect("need a styleName in the UFO to derive a source name from");
+                fontgarden
+                    .import(&font, &import_glyphs, set_name, &source_name)
+                    .expect("can't import font");
+            }
+
             fontgarden.save(fontgarden_path)
         }
         Commands::Export {

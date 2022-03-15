@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use super::metadata::{load_color_marks, write_color_marks};
 use super::LoadError;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct Layer {
     pub glyphs: BTreeMap<Name, norad::Glyph>,
     pub color_marks: BTreeMap<Name, norad::Color>,

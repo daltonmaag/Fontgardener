@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     path::Path,
 };
 
@@ -35,7 +35,6 @@ pub struct GlyphRecord {
     pub codepoints: Vec<char>,
     // TODO: Make an enum
     pub opentype_category: Option<String>,
-    // TODO: Write fn default that sets true here
     #[serde(default = "default_true")]
     pub export: bool,
 }
@@ -112,6 +111,10 @@ impl Fontgarden {
         }
     }
 
+    /// Import glyphs from a UFO into the Fontgarden.
+    ///
+    /// Strategy: for each imported glyph, if the name already exists in some
+    /// set, import it there, else import it into `set_name`.
     pub fn import(
         &mut self,
         font: &norad::Font,
@@ -119,23 +122,62 @@ impl Fontgarden {
         set_name: &Name,
         source_name: &Name,
     ) -> Result<(), LoadError> {
-        let set = self.sets.entry(set_name.clone()).or_default();
-        let source = set.sources.entry(source_name.clone()).or_default();
+        let mut glyph_data = crate::util::extract_glyph_data(font, glyphs);
 
-        // TODO: check for glyph uniqueness per set
-        // TODO: follow components and check if they are present in another set
-        let glyph_data = crate::util::extract_glyph_data(font, glyphs);
-        set.glyph_data.extend(glyph_data);
+        // Check if some glyphs are already in other sets so we can route them
+        // there. Fresh glyphs without an entry can then go into `set_name`.
+        let mut glyphs_leftovers = glyphs.clone();
+        let mut set_to_glyphs: HashMap<Name, HashSet<Name>> = HashMap::new();
+        for (set_name, set) in &self.sets {
+            let coverage = set.glyph_coverage();
+            let intersection: HashSet<Name> = coverage.intersection(glyphs).cloned().collect();
+            if intersection.is_empty() {
+                continue;
+            }
+            glyphs_leftovers.retain(|n| !intersection.contains(n));
+            set_to_glyphs.insert(set_name.clone(), intersection);
+        }
+        if !glyphs_leftovers.is_empty() {
+            set_to_glyphs.insert(set_name.clone(), glyphs_leftovers);
+        }
 
-        for layer in font.iter_layers() {
-            let mut our_layer = Layer::from_ufo_layer(layer, glyphs);
-            if layer == font.default_layer() {
-                our_layer.default = true;
-                source.layers.insert(layer.name().clone(), our_layer);
-            } else if !our_layer.glyphs.is_empty() {
-                source.layers.insert(layer.name().clone(), our_layer);
+        for (set_name, glyph_names) in set_to_glyphs {
+            let set = self.sets.entry(set_name.clone()).or_default();
+            for name in &glyph_names {
+                if let Some((key, value)) = glyph_data.remove_entry(name) {
+                    set.glyph_data.insert(key, value);
+                }
+            }
+
+            let source = set.sources.entry(source_name.clone()).or_insert_with(|| {
+                Source::new_with_default_layer_name(font.default_layer().name().clone())
+            });
+            assert_eq!(source.layers.values().filter(|l| l.default).count(), 1);
+
+            for layer in font.iter_layers() {
+                let our_layer = Layer::from_ufo_layer(layer, &glyph_names);
+                if our_layer.glyphs.is_empty() {
+                    continue;
+                }
+
+                let target_layer = if layer == font.default_layer() {
+                    source.get_default_layer_mut()
+                } else {
+                    source.get_or_create_layer(layer.name().clone())
+                };
+
+                target_layer.glyphs.extend(our_layer.glyphs);
+                target_layer.color_marks.extend(our_layer.color_marks);
             }
         }
+
+        // TODO: Import glyphs used as components by glyphs on the import list
+        // automatically (recursively follow the graph).
+
+        // TODO: Check incoming composites with components outside the import
+        // set name: are they different? If so, warn the user. E.g. you import
+        // A-cy into Cyrl and the underlying A is different from the A in the
+        // import font. Again track diffs recursively in nested composites.
 
         Ok(())
     }
@@ -158,9 +200,7 @@ impl Fontgarden {
                 .iter()
                 .filter(|(name, _)| source_names.contains(*name))
             {
-                let ufo = ufos
-                    .entry(source_name.clone())
-                    .or_insert_with(norad::Font::new);
+                let ufo = ufos.entry(source_name.clone()).or_default();
                 for (layer_name, layer) in &source.layers {
                     let layer_glyphs: Vec<_> = layer
                         .glyphs
@@ -174,16 +214,27 @@ impl Fontgarden {
                         {
                             let ufo_layer = ufo.layers.default_layer_mut();
                             for glyph in layer_glyphs {
-                                ufo_layer.insert_glyph(glyph.clone());
+                                let mut new_glyph = glyph.clone();
+                                // TODO: dedicated export function for layer glyphs
+                                if let Some(c) = layer.color_marks.get(&glyph.name) {
+                                    new_glyph.lib.insert(
+                                        "public.markColor".into(),
+                                        c.to_rgba_string().into(),
+                                    );
+                                }
+                                ufo_layer.insert_glyph(new_glyph);
                             }
                         }
-                        ufo.layers
-                            .rename_layer(
-                                &ufo.layers.default_layer().name().clone(),
-                                layer_name,
-                                false,
-                            )
-                            .unwrap();
+                        // TODO: be smarter about naming default layers?
+                        if layer_name != ufo.layers.default_layer_mut().name() {
+                            ufo.layers
+                                .rename_layer(
+                                    &ufo.layers.default_layer().name().clone(),
+                                    layer_name,
+                                    false,
+                                )
+                                .unwrap();
+                        }
                     } else {
                         match ufo.layers.get_mut(layer_name) {
                             Some(ufo_layer) => {
@@ -265,6 +316,10 @@ impl Set {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
+    use norad::Color;
+
     use super::*;
 
     #[test]
@@ -350,6 +405,10 @@ mod tests {
                 .unwrap();
         }
 
+        let tempdir = tempfile::tempdir().unwrap();
+        fontgarden.save(tempdir.path());
+        let fontgarden2 = Fontgarden::from_path(tempdir.path()).unwrap();
+
         for set in fontgarden.sets.values() {
             for source in set.sources.values() {
                 for (layer_name, layer) in &source.layers {
@@ -362,11 +421,186 @@ mod tests {
             }
         }
 
-        let tempdir = tempfile::tempdir().unwrap();
-        fontgarden.save(tempdir.path());
-        let fontgarden2 = Fontgarden::from_path(tempdir.path()).unwrap();
-
         use pretty_assertions::assert_eq;
         assert_eq!(fontgarden, fontgarden2);
+    }
+
+    #[test]
+    fn roundtrip_mutatorsans_export_import() {
+        let mut fontgarden = Fontgarden::new();
+
+        let mut ufo_lightwide = norad::Font::load("testdata/MutatorSansLightWide.ufo").unwrap();
+        let mut ufo_lightcond =
+            norad::Font::load("testdata/MutatorSansLightCondensed.ufo").unwrap();
+
+        // TODO: find workaround for equality testing color accuracy.
+        for ufo in [&mut ufo_lightwide, &mut ufo_lightcond] {
+            let layer_names: Vec<_> = ufo.layers.iter().map(|l| l.name()).cloned().collect();
+            for layer_name in layer_names {
+                let layer = ufo.layers.get_mut(&layer_name).unwrap();
+                for glyph in layer.iter_mut() {
+                    if let Some(color_string) = glyph.lib.remove("public.markColor") {
+                        // FIXME: We roundtrip color here so that we round up front to
+                        // make roundtrip equality testing easier.
+                        let our_color = Color::from_str(color_string.as_string().unwrap()).unwrap();
+                        let our_color = Color::from_str(&our_color.to_rgba_string()).unwrap();
+                        glyph
+                            .lib
+                            .insert("public.markColor".into(), our_color.to_rgba_string().into());
+                    }
+                }
+            }
+        }
+
+        let name_latin = Name::new("Latin").unwrap();
+        let name_default = Name::new("default").unwrap();
+
+        let latin_set: HashSet<Name> = ["A", "Aacute", "S"]
+            .iter()
+            .map(|n| Name::new(n).unwrap())
+            .collect();
+
+        let mut glyph_names = HashSet::new();
+        let mut source_names = HashSet::new();
+        for font in [&ufo_lightwide, &ufo_lightcond] {
+            let source_name = font
+                .font_info
+                .style_name
+                .as_ref()
+                .map(|v| Name::new(v).unwrap())
+                .unwrap();
+            glyph_names.extend(font.iter_names());
+            source_names.insert(source_name.clone());
+
+            fontgarden
+                .import(font, &latin_set, &name_latin, &source_name)
+                .unwrap();
+
+            fontgarden
+                .import(
+                    font,
+                    &HashSet::from_iter(font.iter_names())
+                        .difference(&latin_set)
+                        .cloned()
+                        .collect(),
+                    &name_default,
+                    &source_name,
+                )
+                .unwrap();
+        }
+
+        let roundtripped_ufos = fontgarden
+            .export(
+                &HashSet::from_iter([name_latin, name_default].iter().cloned()),
+                &glyph_names,
+                &source_names,
+            )
+            .unwrap();
+
+        assert_font_eq(&ufo_lightwide, &roundtripped_ufos["LightWide"]);
+        assert_font_eq(&ufo_lightcond, &roundtripped_ufos["LightCondensed"]);
+    }
+
+    fn assert_font_eq(reference: &norad::Font, other: &norad::Font) {
+        // TODO: compare more than glyphs.
+        for reference_layer in reference.layers.iter() {
+            let reference_glyphs: Vec<_> = reference_layer.iter().collect();
+            let other_layer = other.layers.get(reference_layer.name()).unwrap();
+            let other_glyphs: Vec<_> = other_layer.iter().collect();
+            assert_eq!(reference_glyphs, other_glyphs);
+        }
+    }
+
+    #[test]
+    fn update_sets() {
+        let mut fontgarden = Fontgarden::new();
+
+        let mut ufo_lightwide = norad::Font::load("testdata/MutatorSansLightWide.ufo").unwrap();
+        let mut ufo_lightcond =
+            norad::Font::load("testdata/MutatorSansLightCondensed.ufo").unwrap();
+
+        // TODO: compare glyphs differently so color marks don't matter.
+        for ufo in [&mut ufo_lightwide, &mut ufo_lightcond] {
+            let layer_names: Vec<_> = ufo.layers.iter().map(|l| l.name()).cloned().collect();
+            for layer_name in layer_names {
+                let layer = ufo.layers.get_mut(&layer_name).unwrap();
+                for glyph in layer.iter_mut() {
+                    glyph.lib.remove("public.markColor");
+                }
+            }
+        }
+
+        let name_latin = Name::new("Latin").unwrap();
+        let name_default = Name::new("default").unwrap();
+        let name_a = Name::new("A").unwrap();
+        let name_arrowleft = Name::new("arrowleft").unwrap();
+
+        let latin_set = HashSet::from([name_a]);
+        let default_set = HashSet::from([name_arrowleft]);
+
+        for font in [&ufo_lightwide, &ufo_lightcond] {
+            let source_name = font
+                .font_info
+                .style_name
+                .as_ref()
+                .map(|v| Name::new(v).unwrap())
+                .unwrap();
+
+            fontgarden
+                .import(font, &latin_set, &name_latin, &source_name)
+                .unwrap();
+            fontgarden
+                .import(font, &default_set, &name_default, &source_name)
+                .unwrap();
+        }
+
+        assert_eq!(
+            &fontgarden.sets["Latin"].sources["LightWide"].layers["foreground"].glyphs["A"],
+            ufo_lightwide.get_glyph("A").unwrap()
+        );
+        assert_eq!(
+            &fontgarden.sets["default"].sources["LightCondensed"].layers["foreground"].glyphs
+                ["arrowleft"],
+            ufo_lightcond.get_glyph("arrowleft").unwrap()
+        );
+
+        ufo_lightwide
+            .get_glyph_mut("A")
+            .unwrap()
+            .lib
+            .insert("aaaa".into(), 1.into());
+        ufo_lightcond
+            .get_glyph_mut("arrowleft")
+            .unwrap()
+            .lib
+            .insert("bbbb".into(), 1.into());
+
+        for font in [&ufo_lightwide, &ufo_lightcond] {
+            let source_name = font
+                .font_info
+                .style_name
+                .as_ref()
+                .map(|v| Name::new(v).unwrap())
+                .unwrap();
+
+            fontgarden
+                .import(
+                    font,
+                    &latin_set.union(&default_set).cloned().collect(),
+                    &name_latin,
+                    &source_name,
+                )
+                .unwrap();
+        }
+
+        assert_eq!(
+            &fontgarden.sets["Latin"].sources["LightWide"].layers["foreground"].glyphs["A"],
+            ufo_lightwide.get_glyph("A").unwrap()
+        );
+        assert_eq!(
+            &fontgarden.sets["default"].sources["LightCondensed"].layers["foreground"].glyphs
+                ["arrowleft"],
+            ufo_lightcond.get_glyph("arrowleft").unwrap()
+        );
     }
 }
