@@ -301,6 +301,7 @@ dependencies = [
 [[package]]
 name = "norad"
 version = "0.7.0"
+source = "git+https://github.com/linebender/norad.git?branch=prefill-layerset-paths#446f566169726df24a87924e71996fe0c0ac52cb"
 dependencies = [
  "plist",
  "quick-xml",
