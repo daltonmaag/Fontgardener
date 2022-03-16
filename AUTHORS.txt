@@ -1,0 +1,8 @@
+# This is the list of Fontgardener's copyright holders.
+#
+# This does not necessarily list everyone who has contributed code,
+# especially since many employees of one corporation may be contributing.
+# To see the full list of contributors, see the CONTRIBUTORS file and
+# revision history in source control.
+
+Google LLC
