@@ -184,17 +184,12 @@ impl Fontgarden {
 
     pub fn export(
         &self,
-        set_names: &HashSet<Name>,
         glyph_names: &HashSet<Name>,
         source_names: &HashSet<Name>,
     ) -> Result<BTreeMap<Name, norad::Font>, ExportError> {
         let mut ufos: BTreeMap<Name, norad::Font> = BTreeMap::new();
 
-        for (_, set) in self
-            .sets
-            .iter()
-            .filter(|(name, _)| set_names.contains(*name))
-        {
+        for set in self.sets.values() {
             for (source_name, source) in set
                 .sources
                 .iter()
@@ -489,13 +484,7 @@ mod tests {
                 .unwrap();
         }
 
-        let roundtripped_ufos = fontgarden
-            .export(
-                &HashSet::from_iter([name_latin, name_default].iter().cloned()),
-                &glyph_names,
-                &source_names,
-            )
-            .unwrap();
+        let roundtripped_ufos = fontgarden.export(&glyph_names, &source_names).unwrap();
 
         assert_font_eq(&ufo_lightwide, &roundtripped_ufos["LightWide"]);
         assert_font_eq(&ufo_lightcond, &roundtripped_ufos["LightCondensed"]);
@@ -602,5 +591,64 @@ mod tests {
                 ["arrowleft"],
             ufo_lightcond.get_glyph("arrowleft").unwrap()
         );
+    }
+
+    #[test]
+    fn roundtrip_mutatorsans_follow_components() {
+        let mut fontgarden = Fontgarden::new();
+
+        let ufo_paths = [
+            "testdata/MutatorSansLightWide.ufo",
+            "testdata/MutatorSansLightCondensed.ufo",
+        ];
+
+        let set_name = Name::new("Latin").unwrap();
+        let glyphs: HashSet<Name> = HashSet::from([Name::new("Aacute").unwrap()]);
+        let glyphs_expected: HashSet<Name> =
+            HashSet::from(["A", "Aacute", "acute"].map(|n| Name::new(n).unwrap()));
+
+        for ufo_path in ufo_paths {
+            let font = norad::Font::load(ufo_path).unwrap();
+            let source_name = font
+                .font_info
+                .style_name
+                .as_ref()
+                .map(|v| Name::new(v).unwrap())
+                .unwrap();
+
+            let glyphs = crate::util::follow_composites(&font, &glyphs);
+            fontgarden
+                .import(&font, &glyphs, &set_name, &source_name)
+                .unwrap();
+        }
+
+        for (set_name, set) in fontgarden.sets.iter() {
+            for (source_name, source) in set.sources.iter() {
+                for (layer_name, layer) in source.layers.iter() {
+                    assert!(
+                        // Some layers may contain the "A" but not the "Aacute".
+                        HashSet::from_iter(layer.glyphs.keys().cloned())
+                            .is_subset(&glyphs_expected),
+                        "Set {set_name}, source {source_name}, layer {layer_name}"
+                    );
+                }
+            }
+        }
+
+        let source_names =
+            HashSet::from(["LightWide", "LightCondensed"].map(|n| Name::new(n).unwrap()));
+        let exports = fontgarden.export(&glyphs, &source_names).unwrap();
+
+        for (font_name, font) in exports.iter() {
+            for layer in font.layers.iter() {
+                assert!(
+                    // Some layers may contain the "A" but not the "Aacute".
+                    HashSet::from_iter(layer.iter().map(|g| g.name.clone()))
+                        .is_subset(&glyphs_expected),
+                    "Font {font_name}, layer {}",
+                    layer.name()
+                );
+            }
+        }
     }
 }

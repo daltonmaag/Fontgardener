@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     path::Path,
 };
 
@@ -61,4 +61,88 @@ pub(crate) fn load_glyph_list(path: &Path) -> Result<HashSet<Name>, std::io::Err
         .map(|v| Name::new(v).unwrap())
         .collect();
     Ok(names)
+}
+
+pub(crate) fn follow_composites(
+    font: &norad::Font,
+    import_glyphs: &HashSet<Name>,
+) -> HashSet<Name> {
+    let mut discovered_glyphs = import_glyphs.clone();
+    let mut stack = Vec::new();
+    for name in import_glyphs.iter() {
+        let glyph = font
+            .get_glyph(name)
+            .unwrap_or_else(|| panic!("glyph {name} not in font"));
+
+        for component in &glyph.components {
+            stack.push(component);
+            // TODO: guard against loops
+            while let Some(component) = stack.pop() {
+                let new_glyph = font
+                    .get_glyph(&component.base)
+                    .unwrap_or_else(|| panic!("glyph {} not in font", &component.base));
+                discovered_glyphs.insert(new_glyph.name.clone());
+                for new_component in new_glyph.components.iter().rev() {
+                    stack.push(new_component);
+                }
+            }
+        }
+        assert!(stack.is_empty());
+    }
+    discovered_glyphs
+}
+
+pub(crate) fn follow_components(
+    fontgarden: &Fontgarden,
+    name: Name,
+    reverse_coverage: &HashMap<Name, Name>,
+) -> HashSet<Name> {
+    let mut discovered_glyphs = HashSet::new();
+    let mut stack = Vec::new();
+
+    fn collect_glyph_component_names_from_set(
+        fontgarden: &Fontgarden,
+        set_name: Name,
+        name: Name,
+    ) -> HashSet<Name> {
+        let mut component_names = HashSet::new();
+        for source in fontgarden.sets[&set_name].sources.values() {
+            for layer in source.layers.values() {
+                if let Some(glyph) = layer.glyphs.get(&name) {
+                    component_names.extend(glyph.components.iter().map(|c| c.base.clone()));
+                }
+            }
+        }
+        component_names
+    }
+
+    let set = &fontgarden.sets[&reverse_coverage[&name]];
+    for source in set.sources.values() {
+        for layer in source.layers.values() {
+            if let Some(glyph) = layer.glyphs.get(&name) {
+                for component in &glyph.components {
+                    stack.push(component.base.clone());
+                    // TODO: guard against loops
+                    while let Some(component_name) = stack.pop() {
+                        // TODO: guard against non-existent glyphs
+                        let component_names = collect_glyph_component_names_from_set(
+                            fontgarden,
+                            reverse_coverage[&component_name].clone(),
+                            glyph.name.clone(),
+                        );
+
+                        discovered_glyphs.insert(component_name.clone());
+                        stack.extend(
+                            component_names
+                                .into_iter()
+                                .filter(|v| !discovered_glyphs.contains(v)),
+                        );
+                    }
+                }
+                assert!(stack.is_empty());
+            }
+        }
+    }
+
+    discovered_glyphs
 }
