@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use clap::{ArgGroup, CommandFactory, Parser, Subcommand};
@@ -78,8 +78,7 @@ fn main() {
 
     match &cli.command {
         Commands::New { path } => {
-            let fontgarden = structs::Fontgarden::new();
-            fontgarden.save(path);
+            new(path);
         }
         Commands::Import {
             fontgarden_path,
@@ -87,67 +86,7 @@ fn main() {
             sets,
             fonts,
         } => {
-            if !glyphs_files.is_empty() && glyphs_files.len() != sets.len() {
-                error_and_exit(
-                    clap::ErrorKind::WrongNumberOfValues,
-                    "The --glyphs-file argument must occur as often as the --set argument.",
-                );
-            }
-
-            let mut fontgarden =
-                structs::Fontgarden::from_path(fontgarden_path).expect("can't load fontgarden");
-
-            let mut set_members = Vec::new();
-            if !glyphs_files.is_empty() {
-                // If glyph name files are specified, take the glyph names to
-                // import from them. An unknown set name means a new set should
-                // be created with the given glyph names.
-                for (set_name, glyphs_file) in sets.iter().zip(glyphs_files.iter()) {
-                    let glyph_names =
-                        util::load_glyph_list(glyphs_file).expect("can't load glyphs file");
-                    set_members.push((set_name.clone(), glyph_names));
-                }
-            } else {
-                // When only set names are specified, take the glyph names to
-                // import from the Fontgarden itself. An unknown set name is
-                // therefore an error.
-                for set_name in sets.iter() {
-                    match fontgarden.sets.get(set_name) {
-                        Some(set) => {
-                            let coverage = set.glyph_coverage();
-                            set_members.push((set_name.clone(), coverage));
-                        }
-                        None => {
-                            error_and_exit(
-                                clap::ErrorKind::ValueValidation,
-                                concat!(
-                                    "Cannot find set named '{set_name}'. ",
-                                    "To define a new set, use the --glyphs-file argument."
-                                ),
-                            );
-                        }
-                    }
-                }
-            }
-
-            for font in fonts {
-                let font = norad::Font::load(&font).expect("can't load font");
-                let source_name = font
-                    .font_info
-                    .style_name
-                    .as_ref()
-                    .map(|v| Name::new(v).unwrap())
-                    .expect("need a styleName in the UFO to derive a source name from");
-
-                for (set_name, import_glyphs) in &set_members {
-                    let import_glyphs = util::ufo_follow_composites(&font, import_glyphs);
-                    fontgarden
-                        .import(&font, &import_glyphs, set_name, &source_name)
-                        .expect("can't import font")
-                }
-            }
-
-            fontgarden.save(fontgarden_path)
+            import(glyphs_files, sets, fontgarden_path, fonts);
         }
         Commands::Export {
             fontgarden_path,
@@ -156,79 +95,162 @@ fn main() {
             source_names,
             output_dir,
         } => {
-            let fontgarden =
-                structs::Fontgarden::from_path(fontgarden_path).expect("can't load fontgarden");
+            export(
+                fontgarden_path,
+                glyphs_file.as_ref().map(|f| f.as_ref()),
+                sets,
+                source_names,
+                output_dir.as_ref(),
+            );
+        }
+    }
+}
 
-            let coverage: HashMap<Name, HashSet<Name>> = fontgarden
-                .sets
-                .iter()
-                .map(|(name, set)| (name.clone(), set.glyph_coverage()))
-                .collect();
-            let mut reverse_coverage = HashMap::new();
-            for (set_name, coverage) in &coverage {
-                for glyph_name in coverage {
-                    reverse_coverage.insert(glyph_name.clone(), set_name.clone());
+fn new(path: &Path) {
+    let fontgarden = structs::Fontgarden::new();
+    fontgarden.save(path);
+}
+
+fn import(glyphs_files: &[PathBuf], sets: &[Name], fontgarden_path: &Path, fonts: &[PathBuf]) {
+    if !glyphs_files.is_empty() && glyphs_files.len() != sets.len() {
+        error_and_exit(
+            clap::ErrorKind::WrongNumberOfValues,
+            "The --glyphs-file argument must occur as often as the --set argument.",
+        );
+    }
+
+    let mut fontgarden =
+        structs::Fontgarden::from_path(fontgarden_path).expect("can't load fontgarden");
+
+    let mut set_members = Vec::new();
+    if !glyphs_files.is_empty() {
+        // If glyph name files are specified, take the glyph names to
+        // import from them. An unknown set name means a new set should
+        // be created with the given glyph names.
+        for (set_name, glyphs_file) in sets.iter().zip(glyphs_files.iter()) {
+            let glyph_names = util::load_glyph_list(glyphs_file).expect("can't load glyphs file");
+            set_members.push((set_name.clone(), glyph_names));
+        }
+    } else {
+        // When only set names are specified, take the glyph names to
+        // import from the Fontgarden itself. An unknown set name is
+        // therefore an error.
+        for set_name in sets.iter() {
+            match fontgarden.sets.get(set_name) {
+                Some(set) => {
+                    let coverage = set.glyph_coverage();
+                    set_members.push((set_name.clone(), coverage));
                 }
-            }
-
-            // NOTE: export's --set and --glyphs-file behave differently from
-            // import. You either have a glyphs file with the stuff you want to
-            // export or the names of sets.
-            let mut glyph_names = match glyphs_file {
-                Some(path) => crate::util::load_glyph_list(path).expect("can't load glyph names"),
                 None => {
-                    let mut names = HashSet::new();
-
-                    if sets.is_empty() {
-                        for set_name in fontgarden.sets.keys() {
-                            names.extend(coverage[set_name].iter().cloned());
-                        }
-                    } else {
-                        for set_name in sets {
-                            let coverage = coverage
-                                .get(set_name)
-                                .unwrap_or_else(|| panic!("cannot find set named {}", set_name));
-                            names.extend(coverage.iter().cloned());
-                        }
-                    }
-
-                    names
+                    error_and_exit(
+                        clap::ErrorKind::ValueValidation,
+                        concat!(
+                            "Cannot find set named '{set_name}'. ",
+                            "To define a new set, use the --glyphs-file argument."
+                        ),
+                    );
                 }
-            };
-
-            let mut additional_names = HashSet::new();
-            for name in &glyph_names {
-                additional_names.extend(crate::util::fontgarden_follow_components(
-                    &fontgarden,
-                    name.clone(),
-                    &reverse_coverage,
-                ))
-            }
-            glyph_names.extend(additional_names);
-
-            let source_names: HashSet<Name> = if source_names.is_empty() {
-                let mut names = HashSet::new();
-                for set in fontgarden.sets.values() {
-                    names.extend(set.sources.keys().cloned());
-                }
-                names
-            } else {
-                source_names.iter().cloned().collect()
-            };
-
-            let ufos = fontgarden
-                .export(&glyph_names, &source_names)
-                .expect("can't export to ufos");
-
-            let output_dir = match output_dir {
-                Some(d) => d.clone(),
-                None => std::env::current_dir().expect("can't get current dir"),
-            };
-            for (ufo_name, ufo) in ufos.iter() {
-                let filename = format!("{ufo_name}.ufo");
-                ufo.save(output_dir.join(filename)).expect("can't save ufo");
             }
         }
+    }
+
+    for font in fonts {
+        let font = norad::Font::load(&font).expect("can't load font");
+        let source_name = font
+            .font_info
+            .style_name
+            .as_ref()
+            .map(|v| Name::new(v).unwrap())
+            .expect("need a styleName in the UFO to derive a source name from");
+
+        for (set_name, import_glyphs) in &set_members {
+            let import_glyphs = util::ufo_follow_composites(&font, import_glyphs);
+            fontgarden
+                .import(&font, &import_glyphs, set_name, &source_name)
+                .expect("can't import font")
+        }
+    }
+
+    fontgarden.save(fontgarden_path)
+}
+
+fn export(
+    fontgarden_path: &Path,
+    glyphs_file: Option<&Path>,
+    sets: &[Name],
+    source_names: &[Name],
+    output_dir: Option<&PathBuf>,
+) {
+    let fontgarden =
+        structs::Fontgarden::from_path(fontgarden_path).expect("can't load fontgarden");
+
+    let coverage: HashMap<Name, HashSet<Name>> = fontgarden
+        .sets
+        .iter()
+        .map(|(name, set)| (name.clone(), set.glyph_coverage()))
+        .collect();
+    let mut reverse_coverage = HashMap::new();
+    for (set_name, coverage) in &coverage {
+        for glyph_name in coverage {
+            reverse_coverage.insert(glyph_name.clone(), set_name.clone());
+        }
+    }
+
+    // NOTE: export's --set and --glyphs-file behave differently from
+    // import. You either have a glyphs file with the stuff you want to
+    // export or the names of sets.
+    let mut glyph_names = match glyphs_file {
+        Some(path) => crate::util::load_glyph_list(path).expect("can't load glyph names"),
+        None => {
+            let mut names = HashSet::new();
+
+            if sets.is_empty() {
+                for set_name in fontgarden.sets.keys() {
+                    names.extend(coverage[set_name].iter().cloned());
+                }
+            } else {
+                for set_name in sets {
+                    let coverage = coverage
+                        .get(set_name)
+                        .unwrap_or_else(|| panic!("cannot find set named {}", set_name));
+                    names.extend(coverage.iter().cloned());
+                }
+            }
+
+            names
+        }
+    };
+
+    let mut additional_names = HashSet::new();
+    for name in &glyph_names {
+        additional_names.extend(crate::util::fontgarden_follow_components(
+            &fontgarden,
+            name.clone(),
+            &reverse_coverage,
+        ))
+    }
+    glyph_names.extend(additional_names);
+
+    let source_names: HashSet<Name> = if source_names.is_empty() {
+        let mut names = HashSet::new();
+        for set in fontgarden.sets.values() {
+            names.extend(set.sources.keys().cloned());
+        }
+        names
+    } else {
+        source_names.iter().cloned().collect()
+    };
+
+    let ufos = fontgarden
+        .export(&glyph_names, &source_names)
+        .expect("can't export to ufos");
+    let output_dir = match output_dir {
+        Some(d) => d.clone(),
+        None => std::env::current_dir().expect("can't get current dir"),
+    };
+    for (ufo_name, ufo) in ufos.iter() {
+        let filename = format!("{ufo_name}.ufo");
+        ufo.save(output_dir.join(filename)).expect("can't save ufo");
     }
 }
 
