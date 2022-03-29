@@ -616,7 +616,7 @@ mod tests {
                 .map(|v| Name::new(v).unwrap())
                 .unwrap();
 
-            let glyphs = crate::util::follow_composites(&font, &glyphs);
+            let glyphs = crate::util::ufo_follow_composites(&font, &glyphs);
             fontgarden
                 .import(&font, &glyphs, &set_name, &source_name)
                 .unwrap();

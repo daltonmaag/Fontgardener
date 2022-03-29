@@ -63,7 +63,7 @@ pub(crate) fn load_glyph_list(path: &Path) -> Result<HashSet<Name>, std::io::Err
     Ok(names)
 }
 
-pub(crate) fn follow_composites(
+pub(crate) fn ufo_follow_composites(
     font: &norad::Font,
     import_glyphs: &HashSet<Name>,
 ) -> HashSet<Name> {
@@ -92,7 +92,7 @@ pub(crate) fn follow_composites(
     discovered_glyphs
 }
 
-pub(crate) fn follow_components(
+pub(crate) fn fontgarden_follow_components(
     fontgarden: &Fontgarden,
     name: Name,
     reverse_coverage: &HashMap<Name, Name>,

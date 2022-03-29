@@ -144,7 +144,7 @@ fn main() {
                     .expect("need a styleName in the UFO to derive a source name from");
 
                 for (set_name, import_glyphs) in &set_members {
-                    let import_glyphs = util::follow_composites(&font, import_glyphs);
+                    let import_glyphs = util::ufo_follow_composites(&font, import_glyphs);
                     fontgarden
                         .import(&font, &import_glyphs, set_name, &source_name)
                         .expect("can't import font")
@@ -202,7 +202,7 @@ fn main() {
 
             let mut additional_names = HashSet::new();
             for name in &glyph_names {
-                additional_names.extend(crate::util::follow_components(
+                additional_names.extend(crate::util::fontgarden_follow_components(
                     &fontgarden,
                     name.clone(),
                     &reverse_coverage,
