@@ -182,6 +182,29 @@ impl Fontgarden {
         Ok(())
     }
 
+    pub fn assemble_sources(&self) -> HashMap<Name, Source> {
+        let mut assembled_sources: HashMap<Name, Source> = HashMap::new();
+
+        for set in self.sets.values() {
+            for (source_name, source) in set.sources.iter() {
+                let assembled_source = assembled_sources.entry(source_name.clone()).or_default();
+                for (layer_name, layer) in source.layers.iter() {
+                    let assembled_layer = assembled_source
+                        .layers
+                        .entry(layer_name.clone())
+                        .or_default();
+                    assembled_layer.glyphs.extend(layer.glyphs.clone());
+                    assembled_layer
+                        .color_marks
+                        .extend(layer.color_marks.clone());
+                    assembled_layer.default = layer.default;
+                }
+            }
+        }
+
+        assembled_sources
+    }
+
     pub fn export(
         &self,
         glyph_names: &HashSet<Name>,
