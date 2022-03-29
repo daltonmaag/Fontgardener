@@ -88,12 +88,10 @@ fn main() {
             fonts,
         } => {
             if !glyphs_files.is_empty() && glyphs_files.len() != sets.len() {
-                let mut cmd = Cli::command();
-                cmd.error(
+                error_and_exit(
                     clap::ErrorKind::WrongNumberOfValues,
                     "The --glyphs-file argument must occur as often as the --set argument.",
-                )
-                .exit();
+                );
             }
 
             let mut fontgarden =
@@ -120,15 +118,13 @@ fn main() {
                             set_members.push((set_name.clone(), coverage));
                         }
                         None => {
-                            let mut cmd = Cli::command();
-                            cmd.error(
+                            error_and_exit(
                                 clap::ErrorKind::ValueValidation,
                                 concat!(
                                     "Cannot find set named '{set_name}'. ",
                                     "To define a new set, use the --glyphs-file argument."
                                 ),
-                            )
-                            .exit();
+                            );
                         }
                     }
                 }
@@ -234,4 +230,9 @@ fn main() {
             }
         }
     }
+}
+
+fn error_and_exit(kind: clap::ErrorKind, message: impl std::fmt::Display) -> ! {
+    let mut cmd = Cli::command();
+    cmd.error(kind, message).exit();
 }
