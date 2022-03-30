@@ -79,6 +79,17 @@ impl Layer {
         }
     }
 
+    pub(crate) fn into_ufo_layer(self, ufo_layer: &mut norad::Layer) {
+        for (name, mut glyph) in self.glyphs {
+            if let Some(c) = self.color_marks.get(&name) {
+                glyph
+                    .lib
+                    .insert("public.markColor".into(), c.to_rgba_string().into());
+            }
+            ufo_layer.insert_glyph(glyph);
+        }
+    }
+
     pub(crate) fn save(
         &self,
         layer_name: &Name,

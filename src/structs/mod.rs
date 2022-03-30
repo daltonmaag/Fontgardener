@@ -246,15 +246,7 @@ impl Fontgarden {
                 if layer.default {
                     {
                         let ufo_layer = ufo.layers.default_layer_mut();
-                        for (glyph_name, mut glyph) in layer.glyphs {
-                            // TODO: dedicated export function for layer glyphs
-                            if let Some(c) = layer.color_marks.get(&glyph_name) {
-                                glyph
-                                    .lib
-                                    .insert("public.markColor".into(), c.to_rgba_string().into());
-                            }
-                            ufo_layer.insert_glyph(glyph);
-                        }
+                        layer.into_ufo_layer(ufo_layer);
                     }
                     // TODO: be smarter about naming default layers?
                     if layer_name != *ufo.layers.default_layer_mut().name() {
@@ -269,18 +261,14 @@ impl Fontgarden {
                 } else {
                     match ufo.layers.get_mut(&layer_name) {
                         Some(ufo_layer) => {
-                            for (_, glyph) in layer.glyphs {
-                                ufo_layer.insert_glyph(glyph);
-                            }
+                            layer.into_ufo_layer(ufo_layer);
                         }
                         None => {
                             let ufo_layer = ufo
                                 .layers
                                 .new_layer(&layer_name)
                                 .expect("can't make new layer");
-                            for (_, glyph) in layer.glyphs {
-                                ufo_layer.insert_glyph(glyph);
-                            }
+                            layer.into_ufo_layer(ufo_layer);
                         }
                     }
                 }
