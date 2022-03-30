@@ -259,18 +259,14 @@ impl Fontgarden {
                             .unwrap();
                     }
                 } else {
-                    match ufo.layers.get_mut(&layer_name) {
-                        Some(ufo_layer) => {
-                            layer.into_ufo_layer(ufo_layer);
-                        }
-                        None => {
-                            let ufo_layer = ufo
-                                .layers
-                                .new_layer(&layer_name)
-                                .expect("can't make new layer");
-                            layer.into_ufo_layer(ufo_layer);
-                        }
-                    }
+                    let ufo_layer = match ufo.layers.get_mut(&layer_name) {
+                        Some(ufo_layer) => ufo_layer,
+                        None => ufo
+                            .layers
+                            .new_layer(&layer_name)
+                            .expect("can't make new layer"),
+                    };
+                    layer.into_ufo_layer(ufo_layer);
                 }
             }
         }
