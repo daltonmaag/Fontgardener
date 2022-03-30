@@ -63,6 +63,30 @@ pub(crate) fn load_glyph_list(path: &Path) -> Result<HashSet<Name>, std::io::Err
     Ok(names)
 }
 
+pub(crate) fn glyphset_follow_composites(
+    import_glyphs: &HashSet<Name>,
+    components_in_glyph: impl Fn(Name) -> Vec<Name>,
+) -> HashSet<Name> {
+    let mut discovered_glyphs = import_glyphs.clone();
+
+    let mut stack = Vec::new();
+    for name in import_glyphs.iter() {
+        // TODO: guard against loops and hanging components.
+        for component in components_in_glyph(name.clone()) {
+            stack.push(component);
+            while let Some(component) = stack.pop() {
+                let new_components = components_in_glyph(component);
+                discovered_glyphs.extend(new_components.iter().cloned());
+                stack.extend(new_components.into_iter().rev())
+            }
+        }
+        assert!(stack.is_empty());
+    }
+
+    discovered_glyphs
+}
+
+// TODO: Unify follow_components for fontgarden and norad::font
 pub(crate) fn ufo_follow_composites(
     font: &norad::Font,
     import_glyphs: &HashSet<Name>,

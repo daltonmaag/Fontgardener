@@ -182,11 +182,15 @@ impl Fontgarden {
         Ok(())
     }
 
-    pub fn assemble_sources(&self) -> HashMap<Name, Source> {
+    fn assemble_sources(&self, source_names: &HashSet<Name>) -> HashMap<Name, Source> {
         let mut assembled_sources: HashMap<Name, Source> = HashMap::new();
 
         for set in self.sets.values() {
-            for (source_name, source) in set.sources.iter() {
+            for (source_name, source) in set
+                .sources
+                .iter()
+                .filter(|(name, _)| source_names.contains(*name))
+            {
                 let assembled_source = assembled_sources.entry(source_name.clone()).or_default();
                 for (layer_name, layer) in source.layers.iter() {
                     let assembled_layer = assembled_source
@@ -212,62 +216,72 @@ impl Fontgarden {
     ) -> Result<BTreeMap<Name, norad::Font>, ExportError> {
         let mut ufos: BTreeMap<Name, norad::Font> = BTreeMap::new();
 
-        for set in self.sets.values() {
-            for (source_name, source) in set
-                .sources
-                .iter()
-                .filter(|(name, _)| source_names.contains(*name))
-            {
-                let ufo = ufos.entry(source_name.clone()).or_default();
-                for (layer_name, layer) in &source.layers {
-                    let layer_glyphs: Vec<_> = layer
+        let mut sources = self.assemble_sources(source_names);
+        for source in sources.values_mut() {
+            for layer in source.layers.values_mut() {
+                let glyph_names = crate::util::glyphset_follow_composites(glyph_names, |n| {
+                    layer
                         .glyphs
-                        .values()
-                        .filter(|g| glyph_names.contains(&*g.name))
-                        .collect();
-                    if layer_glyphs.is_empty() {
-                        continue;
+                        .get(&n)
+                        .map(|g| g.components.iter().map(|c| c.base.clone()).collect())
+                        .unwrap_or_default()
+                });
+                layer.glyphs.retain(|name, _| glyph_names.contains(name));
+                layer
+                    .color_marks
+                    .retain(|name, _| glyph_names.contains(name));
+            }
+        }
+
+        for (source_name, source) in sources {
+            let ufo = ufos.entry(source_name.clone()).or_default();
+            for (layer_name, layer) in &source.layers {
+                let layer_glyphs: Vec<_> = layer
+                    .glyphs
+                    .values()
+                    .filter(|g| glyph_names.contains(&*g.name))
+                    .collect();
+                if layer_glyphs.is_empty() {
+                    continue;
+                }
+                if layer.default {
+                    {
+                        let ufo_layer = ufo.layers.default_layer_mut();
+                        for glyph in layer_glyphs {
+                            let mut new_glyph = glyph.clone();
+                            // TODO: dedicated export function for layer glyphs
+                            if let Some(c) = layer.color_marks.get(&glyph.name) {
+                                new_glyph
+                                    .lib
+                                    .insert("public.markColor".into(), c.to_rgba_string().into());
+                            }
+                            ufo_layer.insert_glyph(new_glyph);
+                        }
                     }
-                    if layer.default {
-                        {
-                            let ufo_layer = ufo.layers.default_layer_mut();
+                    // TODO: be smarter about naming default layers?
+                    if layer_name != ufo.layers.default_layer_mut().name() {
+                        ufo.layers
+                            .rename_layer(
+                                &ufo.layers.default_layer().name().clone(),
+                                layer_name,
+                                false,
+                            )
+                            .unwrap();
+                    }
+                } else {
+                    match ufo.layers.get_mut(layer_name) {
+                        Some(ufo_layer) => {
                             for glyph in layer_glyphs {
-                                let mut new_glyph = glyph.clone();
-                                // TODO: dedicated export function for layer glyphs
-                                if let Some(c) = layer.color_marks.get(&glyph.name) {
-                                    new_glyph.lib.insert(
-                                        "public.markColor".into(),
-                                        c.to_rgba_string().into(),
-                                    );
-                                }
-                                ufo_layer.insert_glyph(new_glyph);
+                                ufo_layer.insert_glyph(glyph.clone());
                             }
                         }
-                        // TODO: be smarter about naming default layers?
-                        if layer_name != ufo.layers.default_layer_mut().name() {
-                            ufo.layers
-                                .rename_layer(
-                                    &ufo.layers.default_layer().name().clone(),
-                                    layer_name,
-                                    false,
-                                )
-                                .unwrap();
-                        }
-                    } else {
-                        match ufo.layers.get_mut(layer_name) {
-                            Some(ufo_layer) => {
-                                for glyph in layer_glyphs {
-                                    ufo_layer.insert_glyph(glyph.clone());
-                                }
-                            }
-                            None => {
-                                let ufo_layer = ufo
-                                    .layers
-                                    .new_layer(layer_name)
-                                    .expect("can't make new layer");
-                                for glyph in layer_glyphs {
-                                    ufo_layer.insert_glyph(glyph.clone());
-                                }
+                        None => {
+                            let ufo_layer = ufo
+                                .layers
+                                .new_layer(layer_name)
+                                .expect("can't make new layer");
+                            for glyph in layer_glyphs {
+                                ufo_layer.insert_glyph(glyph.clone());
                             }
                         }
                     }
