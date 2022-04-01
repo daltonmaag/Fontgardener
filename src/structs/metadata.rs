@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::fs::File;
 use std::path::Path;
 
 use super::GlyphRecord;
@@ -36,19 +35,19 @@ fn parse_codepoints(v: &str) -> Vec<char> {
         .collect()
 }
 
-pub(crate) fn write_glyph_data(glyph_data: &BTreeMap<Name, GlyphRecord>, path: &Path) {
-    let glyph_data_csv_file = File::create(&path).expect("can't create glyph_data.csv");
+pub(crate) fn write_glyph_data(
+    glyph_data: &BTreeMap<Name, GlyphRecord>,
+    path: &Path,
+) -> Result<(), csv::Error> {
+    let mut writer = csv::Writer::from_path(&path)?;
 
-    let mut writer = csv::Writer::from_writer(glyph_data_csv_file);
-    writer
-        .write_record(&[
-            "name",
-            "postscript_name",
-            "codepoints",
-            "opentype_category",
-            "export",
-        ])
-        .expect("can't write csv");
+    writer.write_record(&[
+        "name",
+        "postscript_name",
+        "codepoints",
+        "opentype_category",
+        "export",
+    ])?;
 
     for glyph_name in glyph_data.keys() {
         let record = &glyph_data[glyph_name];
@@ -58,17 +57,17 @@ pub(crate) fn write_glyph_data(glyph_data: &BTreeMap<Name, GlyphRecord>, path: &
             .map(|c| format!("{:04X}", *c as usize))
             .collect::<Vec<_>>()
             .join(" ");
-        writer
-            .serialize((
-                glyph_name,
-                &record.postscript_name,
-                codepoints_str,
-                &record.opentype_category,
-                record.export,
-            ))
-            .expect("can't write csv row");
+        writer.serialize((
+            glyph_name,
+            &record.postscript_name,
+            codepoints_str,
+            &record.opentype_category,
+            record.export,
+        ))?;
     }
-    writer.flush().expect("can't flush csv");
+    writer.flush()?;
+
+    Ok(())
 }
 
 pub(crate) fn load_color_marks(path: &Path) -> BTreeMap<Name, Color> {
@@ -86,14 +85,17 @@ pub(crate) fn load_color_marks(path: &Path) -> BTreeMap<Name, Color> {
     color_marks
 }
 
-pub(crate) fn write_color_marks(path: &Path, color_marks: &BTreeMap<Name, Color>) {
-    let mut writer = csv::Writer::from_path(&path).expect("can't open color_marks.csv");
-    writer
-        .write_record(&["name", "color"])
-        .expect("can't write color_marks header");
+pub(crate) fn write_color_marks(
+    path: &Path,
+    color_marks: &BTreeMap<Name, Color>,
+) -> Result<(), csv::Error> {
+    let mut writer = csv::Writer::from_path(&path)?;
+
+    writer.write_record(&["name", "color"])?;
     for (name, color) in color_marks {
-        writer
-            .serialize((name, color))
-            .expect("can't write color_marks row");
+        writer.serialize((name, color))?;
     }
+    writer.flush()?;
+
+    Ok(())
 }

@@ -12,6 +12,8 @@ use norad::Color;
 use norad::Name;
 use serde::{Deserialize, Serialize};
 
+use crate::errors::SaveLayerError;
+
 use super::metadata::{load_color_marks, write_color_marks};
 use super::LoadError;
 
@@ -95,10 +97,11 @@ impl Layer {
         layer_name: &Name,
         source_path: &Path,
         existing_layer_names: &mut HashSet<String>,
-    ) {
+    ) -> Result<(), SaveLayerError> {
         if self.glyphs.is_empty() {
-            return;
+            return Ok(());
         }
+
         let layer_path = if self.default {
             source_path.join("glyphs")
         } else {
@@ -109,7 +112,7 @@ impl Layer {
             existing_layer_names.insert(path.to_string_lossy().to_string());
             path
         };
-        create_dir(&layer_path).expect("can't create layer dir");
+        create_dir(&layer_path).map_err(SaveLayerError::CreateDir)?;
 
         plist::to_file_xml(
             layer_path.join("layerinfo.plist"),
@@ -117,16 +120,21 @@ impl Layer {
                 name: layer_name.clone(),
             },
         )
-        .expect("can't write layerinfo");
+        .map_err(SaveLayerError::WriteLayerInfo)?;
 
         let mut existing_glyph_names = HashSet::new();
         for (glyph_name, glyph) in &self.glyphs {
             let filename = default_file_name_for_glyph_name(glyph_name, &existing_glyph_names);
             let glyph_path = layer_path.join(&filename);
-            glyph.save(&glyph_path).expect("can't write glif file");
+            glyph
+                .save(&glyph_path)
+                .map_err(|e| SaveLayerError::SaveGlyph(glyph_name.clone(), e))?;
             existing_glyph_names.insert(filename.to_string_lossy().to_string());
         }
 
-        write_color_marks(&layer_path.join("color_marks.csv"), &self.color_marks);
+        write_color_marks(&layer_path.join("color_marks.csv"), &self.color_marks)
+            .map_err(SaveLayerError::WriteColorMarks)?;
+
+        Ok(())
     }
 }

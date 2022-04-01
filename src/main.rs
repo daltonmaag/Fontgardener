@@ -7,6 +7,7 @@ use anyhow::Result;
 use clap::{ArgGroup, CommandFactory, Parser, Subcommand};
 use norad::Name;
 
+mod errors;
 mod structs;
 mod util;
 
@@ -111,7 +112,7 @@ fn main() -> Result<()> {
 
 fn new(path: &Path) -> Result<()> {
     let fontgarden = structs::Fontgarden::new();
-    fontgarden.save(path);
+    fontgarden.save(path)?;
 
     Ok(())
 }
@@ -181,7 +182,7 @@ fn import(
         }
     }
 
-    fontgarden.save(fontgarden_path);
+    fontgarden.save(fontgarden_path)?;
 
     Ok(())
 }

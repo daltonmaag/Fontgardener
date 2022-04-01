@@ -6,6 +6,7 @@ use std::{
 use norad::Name;
 use serde::{Deserialize, Serialize};
 
+use crate::errors::{ExportError, LoadError, SaveError, SaveSetError};
 use layer::Layer;
 use source::Source;
 
@@ -41,24 +42,6 @@ pub struct GlyphRecord {
 
 fn default_true() -> bool {
     true
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum LoadError {
-    #[error("failed to load data from disk")]
-    Io(#[from] std::io::Error),
-    #[error("a fontgarden must be a directory")]
-    NotAFontgarden,
-    #[error("cannot import a glyph as it's in a different set already")]
-    DuplicateGlyph,
-    #[error("no default layer for source found")]
-    NoDefaultLayer,
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum ExportError {
-    #[error("failed to load data from disk")]
-    Other(#[from] Box<dyn std::error::Error>),
 }
 
 impl Fontgarden {
@@ -100,15 +83,18 @@ impl Fontgarden {
         Ok(fontgarden)
     }
 
-    pub fn save(&self, path: &Path) {
+    pub fn save(&self, path: &Path) -> Result<(), SaveError> {
         if path.exists() {
-            std::fs::remove_dir_all(path).expect("can't remove target dir");
+            std::fs::remove_dir_all(path).map_err(SaveError::Cleanup)?;
         }
-        std::fs::create_dir(path).expect("can't create target dir");
+        std::fs::create_dir(path).map_err(SaveError::CreateDir)?;
 
         for (set_name, set) in &self.sets {
-            set.save(set_name, path);
+            set.save(set_name, path)
+                .map_err(|e| SaveError::SaveSet(set_name.clone(), e))?;
         }
+
+        Ok(())
     }
 
     /// Import glyphs from a UFO into the Fontgarden.
@@ -306,15 +292,20 @@ impl Set {
         })
     }
 
-    pub fn save(&self, set_name: &Name, root_path: &Path) {
+    pub fn save(&self, set_name: &Name, root_path: &Path) -> Result<(), SaveSetError> {
         let set_path = root_path.join(format!("set.{set_name}"));
-        std::fs::create_dir(&set_path).expect("can't create set dir");
+        std::fs::create_dir(&set_path).map_err(SaveSetError::CreateDir)?;
 
-        metadata::write_glyph_data(&self.glyph_data, &set_path.join("glyph_data.csv"));
+        metadata::write_glyph_data(&self.glyph_data, &set_path.join("glyph_data.csv"))
+            .map_err(SaveSetError::WriteGlyphData)?;
 
         for (source_name, source) in &self.sources {
-            source.save(source_name, &set_path)
+            source
+                .save(source_name, &set_path)
+                .map_err(|e| SaveSetError::SaveSource(source_name.clone(), e))?;
         }
+
+        Ok(())
     }
 
     pub fn glyph_coverage(&self) -> HashSet<Name> {
@@ -342,7 +333,7 @@ mod tests {
         let tempdir = tempfile::TempDir::new().unwrap();
 
         let fontgarden = Fontgarden::new();
-        fontgarden.save(tempdir.path());
+        fontgarden.save(tempdir.path()).unwrap();
         let fontgarden2 = Fontgarden::from_path(tempdir.path()).unwrap();
 
         assert_eq!(fontgarden, fontgarden2);
@@ -421,7 +412,7 @@ mod tests {
         }
 
         let tempdir = tempfile::tempdir().unwrap();
-        fontgarden.save(tempdir.path());
+        fontgarden.save(tempdir.path()).unwrap();
         let fontgarden2 = Fontgarden::from_path(tempdir.path()).unwrap();
 
         for set in fontgarden.sets.values() {

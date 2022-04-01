@@ -4,6 +4,8 @@ use std::path::Path;
 
 use norad::Name;
 
+use crate::errors::SaveSourceError;
+
 use super::layer::Layer;
 use super::LoadError;
 
@@ -67,13 +69,18 @@ impl Source {
         Ok(Source { layers })
     }
 
-    pub(crate) fn save(&self, source_name: &str, set_path: &Path) {
+    pub(crate) fn save(&self, source_name: &str, set_path: &Path) -> Result<(), SaveSourceError> {
         let source_path = set_path.join(format!("source.{source_name}"));
-        create_dir(&source_path).expect("can't create source dir");
+        create_dir(&source_path).map_err(SaveSourceError::CreateDir)?;
+
         let mut existing_layer_names = HashSet::new();
         for (layer_name, layer) in &self.layers {
-            layer.save(layer_name, &source_path, &mut existing_layer_names);
+            layer
+                .save(layer_name, &source_path, &mut existing_layer_names)
+                .map_err(|e| SaveSourceError::SaveLayer(layer_name.clone(), e))?;
         }
+
+        Ok(())
     }
 
     pub fn get_default_layer_mut(&mut self) -> &mut Layer {
