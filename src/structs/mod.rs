@@ -201,6 +201,7 @@ impl Fontgarden {
                     assembled_layer
                         .color_marks
                         .extend(layer.color_marks.clone());
+                    // TODO: guard against different default layers having different names?
                     assembled_layer.default = layer.default;
                 }
             }
