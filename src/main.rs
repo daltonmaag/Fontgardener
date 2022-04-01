@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use anyhow::Result;
 use clap::{ArgGroup, CommandFactory, Parser, Subcommand};
 use norad::Name;
 
@@ -73,12 +74,12 @@ enum Commands {
     },
 }
 
-fn main() {
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
         Commands::New { path } => {
-            new(path);
+            new(path)?;
         }
         Commands::Import {
             fontgarden_path,
@@ -86,7 +87,7 @@ fn main() {
             sets,
             fonts,
         } => {
-            import(glyphs_files, sets, fontgarden_path, fonts);
+            import(glyphs_files, sets, fontgarden_path, fonts)?;
         }
         Commands::Export {
             fontgarden_path,
@@ -101,17 +102,26 @@ fn main() {
                 sets,
                 source_names,
                 output_dir.as_ref(),
-            );
+            )?;
         }
     }
+
+    Ok(())
 }
 
-fn new(path: &Path) {
+fn new(path: &Path) -> Result<()> {
     let fontgarden = structs::Fontgarden::new();
     fontgarden.save(path);
+
+    Ok(())
 }
 
-fn import(glyphs_files: &[PathBuf], sets: &[Name], fontgarden_path: &Path, fonts: &[PathBuf]) {
+fn import(
+    glyphs_files: &[PathBuf],
+    sets: &[Name],
+    fontgarden_path: &Path,
+    fonts: &[PathBuf],
+) -> Result<()> {
     if !glyphs_files.is_empty() && glyphs_files.len() != sets.len() {
         error_and_exit(
             clap::ErrorKind::WrongNumberOfValues,
@@ -171,7 +181,9 @@ fn import(glyphs_files: &[PathBuf], sets: &[Name], fontgarden_path: &Path, fonts
         }
     }
 
-    fontgarden.save(fontgarden_path)
+    fontgarden.save(fontgarden_path);
+
+    Ok(())
 }
 
 fn export(
@@ -180,7 +192,7 @@ fn export(
     sets: &[Name],
     source_names: &[Name],
     output_dir: Option<&PathBuf>,
-) {
+) -> Result<()> {
     let fontgarden =
         structs::Fontgarden::from_path(fontgarden_path).expect("can't load fontgarden");
 
@@ -252,6 +264,8 @@ fn export(
         let filename = format!("{ufo_name}.ufo");
         ufo.save(output_dir.join(filename)).expect("can't save ufo");
     }
+
+    Ok(())
 }
 
 fn error_and_exit(kind: clap::ErrorKind, message: impl std::fmt::Display) -> ! {
