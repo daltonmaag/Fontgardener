@@ -12,10 +12,10 @@ use norad::Color;
 use norad::Name;
 use serde::{Deserialize, Serialize};
 
+use crate::errors::LoadLayerError;
 use crate::errors::SaveLayerError;
 
 use super::metadata::{load_color_marks, write_color_marks};
-use super::LoadError;
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Layer {
@@ -30,16 +30,18 @@ pub struct LayerInfo {
 }
 
 impl Layer {
-    pub(crate) fn from_path(path: &Path) -> Result<(Self, LayerInfo), LoadError> {
+    pub(crate) fn from_path(path: &Path) -> Result<(Self, LayerInfo), LoadLayerError> {
         let mut glyphs = BTreeMap::new();
-        let color_marks = load_color_marks(&path.join("color_marks.csv"));
-        let layerinfo: LayerInfo =
-            plist::from_file(path.join("layerinfo.plist")).expect("can't load layerinfo");
+        let color_marks = load_color_marks(&path.join("color_marks.csv"))
+            .map_err(LoadLayerError::LoadColorMarks)?;
+        let layerinfo: LayerInfo = plist::from_file(path.join("layerinfo.plist"))
+            .map_err(LoadLayerError::LoadLayerInfo)?;
 
         for entry in read_dir(path)? {
             let path = entry?.path();
             if path.is_file() && path.extension().map_or(false, |n| n == "glif") {
-                let glif = norad::Glyph::load(&path).expect("can't load glif");
+                let glif = norad::Glyph::load(&path)
+                    .map_err(|e| LoadLayerError::LoadGlyph(path.clone(), e))?;
                 glyphs.insert(glif.name.clone(), glif);
             }
         }

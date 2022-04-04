@@ -3,9 +3,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{ArgGroup, CommandFactory, Parser, Subcommand};
 use norad::Name;
+use structs::Fontgarden;
 
 mod errors;
 mod structs;
@@ -111,7 +112,7 @@ fn main() -> Result<()> {
 }
 
 fn new(path: &Path) -> Result<()> {
-    let fontgarden = structs::Fontgarden::new();
+    let fontgarden = Fontgarden::new();
     fontgarden.save(path)?;
 
     Ok(())
@@ -130,8 +131,7 @@ fn import(
         );
     }
 
-    let mut fontgarden =
-        structs::Fontgarden::from_path(fontgarden_path).expect("can't load fontgarden");
+    let mut fontgarden = Fontgarden::from_path(fontgarden_path).context("can't load fontgarden")?;
 
     let mut set_members = Vec::new();
     if !glyphs_files.is_empty() {
@@ -194,8 +194,7 @@ fn export(
     source_names: &[Name],
     output_dir: Option<&PathBuf>,
 ) -> Result<()> {
-    let fontgarden =
-        structs::Fontgarden::from_path(fontgarden_path).expect("can't load fontgarden");
+    let fontgarden = Fontgarden::from_path(fontgarden_path).context("can't load fontgarden")?;
 
     let coverage: HashMap<Name, HashSet<Name>> = fontgarden
         .sets

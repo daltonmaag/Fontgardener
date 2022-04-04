@@ -70,19 +70,20 @@ pub(crate) fn write_glyph_data(
     Ok(())
 }
 
-pub(crate) fn load_color_marks(path: &Path) -> BTreeMap<Name, Color> {
+pub(crate) fn load_color_marks(path: &Path) -> Result<BTreeMap<Name, Color>, csv::Error> {
     let mut color_marks = BTreeMap::new();
 
     if !path.exists() {
-        return color_marks;
+        return Ok(color_marks);
     }
 
-    let mut reader = csv::Reader::from_path(&path).expect("can't open color_marks.csv");
+    let mut reader = csv::Reader::from_path(&path)?;
     for result in reader.deserialize() {
-        let record: (Name, Color) = result.expect("can't read color mark");
+        let record: (Name, Color) = result?;
         color_marks.insert(record.0, record.1);
     }
-    color_marks
+
+    Ok(color_marks)
 }
 
 pub(crate) fn write_color_marks(

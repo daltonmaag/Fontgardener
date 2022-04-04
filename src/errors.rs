@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use norad::Name;
 use thiserror::Error;
 
@@ -9,8 +11,43 @@ pub enum LoadError {
     NotAFontgarden,
     #[error("cannot import a glyph as it's in a different set already")]
     DuplicateGlyph,
+
+    #[error("invalid set name '{0}'")]
+    NamingError(String, norad::error::NamingError),
+    #[error("failed to load set '{0}'")]
+    LoadSet(Name, #[source] LoadSetError),
+}
+
+#[derive(Error, Debug)]
+pub enum LoadSetError {
+    #[error("failed to load data from disk")]
+    Io(#[from] std::io::Error),
+    #[error("invalid set name '{0}'")]
+    NamingError(String, norad::error::NamingError),
+    #[error("failed to load source '{0}'")]
+    LoadSource(Name, #[source] LoadSourceError),
+}
+
+#[derive(Error, Debug)]
+pub enum LoadSourceError {
+    #[error("failed to load data from disk")]
+    Io(#[from] std::io::Error),
     #[error("no default layer for source found")]
     NoDefaultLayer,
+    #[error("failed to load layer from '{0}'")]
+    LoadLayer(PathBuf, #[source] LoadLayerError),
+}
+
+#[derive(Error, Debug)]
+pub enum LoadLayerError {
+    #[error("failed to load data from disk")]
+    Io(#[from] std::io::Error),
+    #[error("failed to load layerinfo.plist file")]
+    LoadLayerInfo(#[source] plist::Error),
+    #[error("failed to load the layer's color_marks.csv file")]
+    LoadColorMarks(#[source] csv::Error),
+    #[error("failed to load glyph from '{0}'")]
+    LoadGlyph(PathBuf, #[source] norad::error::GlifLoadError),
 }
 
 #[derive(Error, Debug)]

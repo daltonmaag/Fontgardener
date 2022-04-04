@@ -6,7 +6,7 @@ use std::{
 use norad::Name;
 use serde::{Deserialize, Serialize};
 
-use crate::errors::{ExportError, LoadError, SaveError, SaveSetError};
+use crate::errors::{ExportError, LoadError, LoadSetError, SaveError, SaveSetError};
 use layer::Layer;
 use source::Source;
 
@@ -59,20 +59,22 @@ impl Fontgarden {
                 let path = entry.path();
                 let metadata = entry.metadata()?;
                 if metadata.is_dir() {
-                    let name = path
-                        .file_name()
-                        .expect("can't read filename")
-                        .to_string_lossy();
-                    if let Some(set_name) = name.strip_prefix("set.") {
-                        let set = Set::from_path(&path)?;
-                        let coverage = set.glyph_coverage();
-                        if seen_glyph_names.intersection(&coverage).next().is_some() {
-                            return Err(LoadError::DuplicateGlyph);
+                    // TODO: Figure out when this call is None and if we should
+                    // deal with it.
+                    if let Some(file_name) = path.file_name() {
+                        if let Some(set_name) = file_name.to_string_lossy().strip_prefix("set.") {
+                            let set_name = Name::new(set_name)
+                                .map_err(|e| LoadError::NamingError(set_name.into(), e))?;
+
+                            let set = Set::from_path(&path)
+                                .map_err(|e| LoadError::LoadSet(set_name.clone(), e))?;
+                            let coverage = set.glyph_coverage();
+                            if seen_glyph_names.intersection(&coverage).next().is_some() {
+                                return Err(LoadError::DuplicateGlyph);
+                            }
+                            seen_glyph_names.extend(coverage);
+                            fontgarden.sets.insert(set_name.clone(), set);
                         }
-                        seen_glyph_names.extend(coverage);
-                        fontgarden
-                            .sets
-                            .insert(Name::new(set_name).expect("can't read set name"), set);
                     }
                 }
             }
@@ -263,7 +265,7 @@ impl Fontgarden {
 }
 
 impl Set {
-    fn from_path(path: &Path) -> Result<Self, LoadError> {
+    fn from_path(path: &Path) -> Result<Self, LoadSetError> {
         let glyph_data = metadata::load_glyph_data(&path.join("glyph_data.csv"));
 
         let mut sources = BTreeMap::new();
@@ -272,16 +274,16 @@ impl Set {
             let path = entry.path();
             let metadata = entry.metadata()?;
             if metadata.is_dir() {
-                let name = path
-                    .file_name()
-                    .expect("can't read filename")
-                    .to_string_lossy();
-                if let Some(source_name) = name.strip_prefix("source.") {
-                    let source = Source::from_path(&path)?;
-                    sources.insert(
-                        Name::new(source_name).expect("can't read source name"),
-                        source,
-                    );
+                // TODO: Figure out when this call is None and if we should deal
+                // with it.
+                if let Some(file_name) = path.file_name() {
+                    if let Some(source_name) = file_name.to_string_lossy().strip_prefix("source.") {
+                        let source_name = Name::new(source_name)
+                            .map_err(|e| LoadSetError::NamingError(source_name.into(), e))?;
+                        let source = Source::from_path(&path)
+                            .map_err(|e| LoadSetError::LoadSource(source_name.clone(), e))?;
+                        sources.insert(source_name, source);
+                    }
                 }
             }
         }
