@@ -69,8 +69,13 @@ impl Fontgarden {
                             let set = Set::from_path(&path)
                                 .map_err(|e| LoadError::LoadSet(set_name.clone(), e))?;
                             let coverage = set.glyph_coverage();
-                            if seen_glyph_names.intersection(&coverage).next().is_some() {
-                                return Err(LoadError::DuplicateGlyph);
+                            let overlapping_coverage: HashSet<Name> =
+                                seen_glyph_names.intersection(&coverage).cloned().collect();
+                            if !overlapping_coverage.is_empty() {
+                                return Err(LoadError::DuplicateGlyphs(
+                                    set_name,
+                                    overlapping_coverage,
+                                ));
                             }
                             seen_glyph_names.extend(coverage);
                             fontgarden.sets.insert(set_name.clone(), set);

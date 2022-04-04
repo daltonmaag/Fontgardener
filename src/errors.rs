@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::HashSet, path::PathBuf};
 
 use norad::Name;
 use thiserror::Error;
@@ -9,9 +9,10 @@ pub enum LoadError {
     Io(#[from] std::io::Error),
     #[error("a fontgarden must be a directory")]
     NotAFontgarden,
-    #[error("cannot import a glyph as it's in a different set already")]
-    DuplicateGlyph,
-
+    #[error(
+        "cannot load set '{0}' as some glyphs it contains are in a different set already: {1:?}"
+    )]
+    DuplicateGlyphs(Name, HashSet<Name>),
     #[error("invalid set name '{0}'")]
     NamingError(String, norad::error::NamingError),
     #[error("failed to load set '{0}'")]
