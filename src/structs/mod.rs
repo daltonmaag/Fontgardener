@@ -270,7 +270,8 @@ impl Fontgarden {
 
 impl Set {
     fn from_path(path: &Path) -> Result<Self, LoadSetError> {
-        let glyph_data = metadata::load_glyph_data(&path.join("glyph_data.csv"));
+        let glyph_data = metadata::load_glyph_data(&path.join("glyph_data.csv"))
+            .map_err(LoadSetError::LoadGlyphData)?;
 
         let mut sources = BTreeMap::new();
         for entry in std::fs::read_dir(path)? {

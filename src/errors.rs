@@ -14,7 +14,7 @@ pub enum LoadError {
     )]
     DuplicateGlyphs(Name, HashSet<Name>),
     #[error("invalid set name '{0}'")]
-    NamingError(String, norad::error::NamingError),
+    NamingError(String, #[source] norad::error::NamingError),
     #[error("failed to load set '{0}'")]
     LoadSet(Name, #[source] LoadSetError),
 }
@@ -24,9 +24,21 @@ pub enum LoadSetError {
     #[error("failed to load data from disk")]
     Io(#[from] std::io::Error),
     #[error("invalid set name '{0}'")]
-    NamingError(String, norad::error::NamingError),
+    NamingError(String, #[source] norad::error::NamingError),
+    #[error("failed to load the set's glyph_data.csv file")]
+    LoadGlyphData(#[source] LoadGlyphDataError),
     #[error("failed to load source '{0}'")]
     LoadSource(Name, #[source] LoadSourceError),
+}
+
+#[derive(Error, Debug)]
+pub enum LoadGlyphDataError {
+    #[error("failed to load data from disk")]
+    Csv(#[source] csv::Error),
+    #[error("invalid glyph name '{0}'")]
+    InvalidGlyphName(String, #[source] norad::error::NamingError),
+    #[error("invalid codepoint '{1}' for glyph {0}")]
+    InvalidCodepoint(Name, String, #[source] anyhow::Error),
 }
 
 #[derive(Error, Debug)]

@@ -1,38 +1,65 @@
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::path::Path;
+
+use crate::errors::LoadGlyphDataError;
 
 use super::GlyphRecord;
 use norad::Color;
 use norad::Name;
 
-pub(crate) fn load_glyph_data(path: &Path) -> BTreeMap<Name, GlyphRecord> {
+pub(crate) fn load_glyph_data(
+    path: &Path,
+) -> Result<BTreeMap<Name, GlyphRecord>, LoadGlyphDataError> {
     let mut glyph_data = BTreeMap::new();
-    let mut reader = csv::Reader::from_path(path).expect("can't open glyph_data.csv");
+    let mut reader = csv::Reader::from_path(path).map_err(LoadGlyphDataError::Csv)?;
 
     type Record = (String, Option<String>, Option<String>, Option<String>, bool);
     for result in reader.deserialize() {
-        let record: Record = result.expect("can't read record");
+        let record: Record = result.map_err(LoadGlyphDataError::Csv)?;
+
+        let glyph_name =
+            Name::new(&record.0).map_err(|e| LoadGlyphDataError::InvalidGlyphName(record.0, e))?;
+        let codepoints = match &record.2 {
+            Some(codepoints_string) => parse_codepoints(codepoints_string).map_err(|e| {
+                LoadGlyphDataError::InvalidCodepoint(
+                    glyph_name.clone(),
+                    codepoints_string.clone(),
+                    e,
+                )
+            })?,
+            None => Vec::new(),
+        };
+
         glyph_data.insert(
-            Name::new(&record.0).expect("can't read glyph name"),
+            glyph_name,
             GlyphRecord {
                 postscript_name: record.1,
-                codepoints: record.2.map(|v| parse_codepoints(&v)).unwrap_or_default(),
+                codepoints,
                 opentype_category: record.3,
                 export: record.4,
             },
         );
     }
 
-    glyph_data
+    Ok(glyph_data)
 }
 
-fn parse_codepoints(v: &str) -> Vec<char> {
-    v.split_whitespace()
-        .map(|v| {
-            char::try_from(u32::from_str_radix(v, 16).expect("can't parse codepoint"))
-                .expect("can't convert codepoint to character")
-        })
-        .collect()
+// NOTE: Use anyhow::Error here because we use anyhow's Context trait in main.
+// Something about Sync and Send.
+fn parse_codepoints(v: &str) -> Result<Vec<char>, anyhow::Error> {
+    let mut codepoints = Vec::new();
+    let mut seen = HashSet::new();
+
+    for codepoint in v.split_whitespace() {
+        let codepoint = u32::from_str_radix(codepoint, 16)?;
+        let codepoint = char::try_from(codepoint)?;
+        if seen.insert(codepoint) {
+            codepoints.push(codepoint);
+        }
+    }
+
+    Ok(codepoints)
 }
 
 pub(crate) fn write_glyph_data(
