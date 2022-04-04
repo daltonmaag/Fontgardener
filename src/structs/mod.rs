@@ -53,38 +53,37 @@ impl Fontgarden {
         let mut fontgarden = Self::new();
         let mut seen_glyph_names: HashSet<Name> = HashSet::new();
 
-        if path.is_dir() {
-            for entry in std::fs::read_dir(path)? {
-                let entry = entry?;
-                let path = entry.path();
-                let metadata = entry.metadata()?;
-                if metadata.is_dir() {
-                    // TODO: Figure out when this call is None and if we should
-                    // deal with it.
-                    if let Some(file_name) = path.file_name() {
-                        if let Some(set_name) = file_name.to_string_lossy().strip_prefix("set.") {
-                            let set_name = Name::new(set_name)
-                                .map_err(|e| LoadError::NamingError(set_name.into(), e))?;
+        if !path.is_dir() {
+            return Err(LoadError::NotAFontgarden);
+        }
 
-                            let set = Set::from_path(&path)
-                                .map_err(|e| LoadError::LoadSet(set_name.clone(), e))?;
-                            let coverage = set.glyph_coverage();
-                            let overlapping_coverage: HashSet<Name> =
-                                seen_glyph_names.intersection(&coverage).cloned().collect();
-                            if !overlapping_coverage.is_empty() {
-                                return Err(LoadError::DuplicateGlyphs(
-                                    set_name,
-                                    overlapping_coverage,
-                                ));
-                            }
-                            seen_glyph_names.extend(coverage);
-                            fontgarden.sets.insert(set_name.clone(), set);
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            let path = entry.path();
+            let metadata = entry.metadata()?;
+            if metadata.is_dir() {
+                // TODO: Figure out when this call is None and if we should deal
+                // with it.
+                if let Some(file_name) = path.file_name() {
+                    if let Some(set_name) = file_name.to_string_lossy().strip_prefix("set.") {
+                        let set_name = Name::new(set_name)
+                            .map_err(|e| LoadError::NamingError(set_name.into(), e))?;
+
+                        let set = Set::from_path(&path)
+                            .map_err(|e| LoadError::LoadSet(set_name.clone(), e))?;
+
+                        let coverage = set.glyph_coverage();
+                        let overlapping_coverage: HashSet<Name> =
+                            seen_glyph_names.intersection(&coverage).cloned().collect();
+                        if !overlapping_coverage.is_empty() {
+                            return Err(LoadError::DuplicateGlyphs(set_name, overlapping_coverage));
                         }
+                        seen_glyph_names.extend(coverage);
+
+                        fontgarden.sets.insert(set_name.clone(), set);
                     }
                 }
             }
-        } else {
-            return Err(LoadError::NotAFontgarden);
         }
 
         Ok(fontgarden)
