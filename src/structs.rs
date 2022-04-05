@@ -132,7 +132,25 @@ impl Fontgarden {
         set_name: &Name,
         source_name: &Name,
     ) -> Result<(), LoadError> {
-        let mut glyph_data = crate::util::extract_glyph_data(font, glyphs);
+        // Also import all glyphs used as components in the glyph list.
+        //
+        // TODO: Write test that exercises different layers referencing
+        // different things.
+        let mut glyphs = glyphs.clone();
+        for layer in font.layers.iter() {
+            let components_in_glyph = |name: Name| {
+                layer
+                    .get_glyph(&name)
+                    .map(|g| g.components.iter().map(|c| c.base.clone()).collect())
+                    .unwrap_or_default()
+            };
+            glyphs.extend(crate::util::glyphset_follow_composites(
+                &glyphs,
+                components_in_glyph,
+            ));
+        }
+
+        let mut glyph_data = crate::util::extract_glyph_data(font, &glyphs);
 
         // Check if some glyphs are already in other sets so we can route them
         // there. Fresh glyphs without an entry can then go into `set_name`.
@@ -140,7 +158,7 @@ impl Fontgarden {
         let mut set_to_glyphs: HashMap<Name, HashSet<Name>> = HashMap::new();
         for (set_name, set) in &self.sets {
             let coverage = set.glyph_coverage();
-            let intersection: HashSet<Name> = coverage.intersection(glyphs).cloned().collect();
+            let intersection: HashSet<Name> = coverage.intersection(&glyphs).cloned().collect();
             if intersection.is_empty() {
                 continue;
             }
@@ -775,79 +793,80 @@ mod tests {
     fn roundtrip_mutatorsans_export_import() {
         let mut fontgarden = Fontgarden::new();
 
-        let mut ufo_lightwide = norad::Font::load("testdata/MutatorSansLightWide.ufo").unwrap();
-        let mut ufo_lightcond =
-            norad::Font::load("testdata/MutatorSansLightCondensed.ufo").unwrap();
-
-        // TODO: find workaround for equality testing color accuracy.
-        for ufo in [&mut ufo_lightwide, &mut ufo_lightcond] {
-            let layer_names: Vec<_> = ufo.layers.iter().map(|l| l.name()).cloned().collect();
-            for layer_name in layer_names {
-                let layer = ufo.layers.get_mut(&layer_name).unwrap();
-                for glyph in layer.iter_mut() {
-                    if let Some(color_string) = glyph.lib.remove("public.markColor") {
-                        // FIXME: We roundtrip color here so that we round up front to
-                        // make roundtrip equality testing easier.
-                        let our_color = Color::from_str(color_string.as_string().unwrap()).unwrap();
-                        let our_color = Color::from_str(&our_color.to_rgba_string()).unwrap();
-                        glyph
-                            .lib
-                            .insert("public.markColor".into(), our_color.to_rgba_string().into());
-                    }
-                }
-            }
+        let mut fonts = [
+            norad::Font::load("testdata/MutatorSansLightWide.ufo").unwrap(),
+            norad::Font::load("testdata/MutatorSansLightCondensed.ufo").unwrap(),
+        ];
+        for font in &mut fonts {
+            scrub_colors(font);
         }
+        let all_glyphs: HashSet<Name> = fonts[0].iter_names().collect();
 
-        let name_latin = Name::new("Latin").unwrap();
-        let name_default = Name::new("default").unwrap();
-
-        let latin_set: HashSet<Name> = ["A", "Aacute", "S"]
+        let latin_glyphs: HashSet<Name> = ["A", "Aacute", "S"]
             .iter()
             .map(|n| Name::new(n).unwrap())
             .collect();
+        let default_glyphs: HashSet<Name> = all_glyphs.difference(&latin_glyphs).cloned().collect();
+        let sets = vec![
+            (Name::new("Latin").unwrap(), latin_glyphs),
+            (Name::new("default").unwrap(), default_glyphs),
+        ];
 
-        let mut glyph_names = HashSet::new();
         let mut source_names = HashSet::new();
-        for font in [&ufo_lightwide, &ufo_lightcond] {
+        for font in &fonts {
             let source_name = font
                 .font_info
                 .style_name
                 .as_ref()
                 .map(|v| Name::new(v).unwrap())
                 .unwrap();
-            glyph_names.extend(font.iter_names());
             source_names.insert(source_name.clone());
 
-            fontgarden
-                .import(font, &latin_set, &name_latin, &source_name)
-                .unwrap();
-
-            fontgarden
-                .import(
-                    font,
-                    &HashSet::from_iter(font.iter_names())
-                        .difference(&latin_set)
-                        .cloned()
-                        .collect(),
-                    &name_default,
-                    &source_name,
-                )
-                .unwrap();
+            for (set_name, set_glyphs) in &sets {
+                fontgarden
+                    .import(font, set_glyphs, set_name, &source_name)
+                    .unwrap();
+            }
         }
 
-        let roundtripped_ufos = fontgarden.export(&glyph_names, &source_names).unwrap();
+        let roundtripped_ufos = fontgarden.export(&all_glyphs, &source_names).unwrap();
 
-        assert_font_eq(&ufo_lightwide, &roundtripped_ufos["LightWide"]);
-        assert_font_eq(&ufo_lightcond, &roundtripped_ufos["LightCondensed"]);
+        assert_font_eq(&fonts[0], &roundtripped_ufos["LightWide"]);
+        assert_font_eq(&fonts[1], &roundtripped_ufos["LightCondensed"]);
+    }
+
+    /// Roundtrip UFO colors to make equality testing easier.
+    fn scrub_colors(font: &mut norad::Font) {
+        let layer_names: Vec<_> = font.layers.iter().map(|l| l.name()).cloned().collect();
+        for layer_name in layer_names {
+            let layer = font.layers.get_mut(&layer_name).unwrap();
+            for glyph in layer.iter_mut() {
+                if let Some(color_string) = glyph.lib.remove("public.markColor") {
+                    let our_color = Color::from_str(color_string.as_string().unwrap()).unwrap();
+                    let our_color = Color::from_str(&our_color.to_rgba_string()).unwrap();
+                    glyph
+                        .lib
+                        .insert("public.markColor".into(), our_color.to_rgba_string().into());
+                }
+            }
+        }
     }
 
     fn assert_font_eq(reference: &norad::Font, other: &norad::Font) {
+        // NOTE: goes over individual fields and glyphs to have finer grained
+        // and faster diffs. Big diffs == slow.
+        //
         // TODO: compare more than glyphs.
+        use pretty_assertions::assert_eq;
+
         for reference_layer in reference.layers.iter() {
-            let reference_glyphs: Vec<_> = reference_layer.iter().collect();
             let other_layer = other.layers.get(reference_layer.name()).unwrap();
-            let other_glyphs: Vec<_> = other_layer.iter().collect();
-            assert_eq!(reference_glyphs, other_glyphs);
+
+            assert_eq!(reference_layer.len(), other_layer.len());
+            for reference in reference_layer.iter() {
+                let other = other_layer.get_glyph(&reference.name).unwrap();
+                assert_eq!(reference, other);
+            }
         }
     }
 
