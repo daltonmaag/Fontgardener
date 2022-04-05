@@ -680,10 +680,6 @@ impl Layer {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
-    use norad::Color;
-
     use super::*;
 
     #[test]
