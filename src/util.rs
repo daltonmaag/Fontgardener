@@ -1,11 +1,11 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     path::Path,
 };
 
 use norad::Name;
 
-use crate::structs::*;
+use crate::structs::GlyphRecord;
 
 pub(crate) fn extract_glyph_data(
     font: &norad::Font,
@@ -113,60 +113,5 @@ pub(crate) fn ufo_follow_composites(
         }
         assert!(stack.is_empty());
     }
-    discovered_glyphs
-}
-
-pub(crate) fn fontgarden_follow_components(
-    fontgarden: &Fontgarden,
-    name: Name,
-    reverse_coverage: &HashMap<Name, Name>,
-) -> HashSet<Name> {
-    let mut discovered_glyphs = HashSet::new();
-    let mut stack = Vec::new();
-
-    fn collect_glyph_component_names_from_set(
-        fontgarden: &Fontgarden,
-        set_name: Name,
-        name: Name,
-    ) -> HashSet<Name> {
-        let mut component_names = HashSet::new();
-        for source in fontgarden.sets[&set_name].sources.values() {
-            for layer in source.layers.values() {
-                if let Some(glyph) = layer.glyphs.get(&name) {
-                    component_names.extend(glyph.components.iter().map(|c| c.base.clone()));
-                }
-            }
-        }
-        component_names
-    }
-
-    let set = &fontgarden.sets[&reverse_coverage[&name]];
-    for source in set.sources.values() {
-        for layer in source.layers.values() {
-            if let Some(glyph) = layer.glyphs.get(&name) {
-                for component in &glyph.components {
-                    stack.push(component.base.clone());
-                    // TODO: guard against loops
-                    while let Some(component_name) = stack.pop() {
-                        // TODO: guard against non-existent glyphs
-                        let component_names = collect_glyph_component_names_from_set(
-                            fontgarden,
-                            reverse_coverage[&component_name].clone(),
-                            glyph.name.clone(),
-                        );
-
-                        discovered_glyphs.insert(component_name.clone());
-                        stack.extend(
-                            component_names
-                                .into_iter()
-                                .filter(|v| !discovered_glyphs.contains(v)),
-                        );
-                    }
-                }
-                assert!(stack.is_empty());
-            }
-        }
-    }
-
     discovered_glyphs
 }

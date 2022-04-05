@@ -211,7 +211,7 @@ fn export(
     // NOTE: export's --set and --glyphs-file behave differently from
     // import. You either have a glyphs file with the stuff you want to
     // export or the names of sets.
-    let mut glyph_names = match glyphs_file {
+    let glyph_names = match glyphs_file {
         Some(path) => crate::util::load_glyph_list(path).expect("can't load glyph names"),
         None => {
             let mut names = HashSet::new();
@@ -232,16 +232,6 @@ fn export(
             names
         }
     };
-
-    let mut additional_names = HashSet::new();
-    for name in &glyph_names {
-        additional_names.extend(crate::util::fontgarden_follow_components(
-            &fontgarden,
-            name.clone(),
-            &reverse_coverage,
-        ))
-    }
-    glyph_names.extend(additional_names);
 
     let source_names: HashSet<Name> = if source_names.is_empty() {
         let mut names = HashSet::new();
