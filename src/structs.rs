@@ -43,7 +43,7 @@ pub struct Layer {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct LayerInfo {
+pub(crate) struct LayerInfo {
     pub name: Name,
 }
 
