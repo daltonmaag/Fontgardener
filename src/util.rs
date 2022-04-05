@@ -89,3 +89,13 @@ pub(crate) fn glyphset_follow_composites(
 
     discovered_glyphs
 }
+
+pub(crate) fn guess_source_name(font: &norad::Font) -> Option<Name> {
+    match font.font_info.style_name.as_ref() {
+        Some(string) => match Name::new(string) {
+            Ok(name) => Some(name),
+            Err(_) => None,
+        },
+        None => None,
+    }
+}

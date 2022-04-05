@@ -725,13 +725,7 @@ mod tests {
         ];
 
         for font in &fonts {
-            let source_name = font
-                .font_info
-                .style_name
-                .as_ref()
-                .map(|v| name!(v))
-                .unwrap();
-
+            let source_name = crate::util::guess_source_name(font).unwrap();
             for (set_name, set_glyphs) in &sets {
                 fontgarden
                     .import(font, set_glyphs, set_name, &source_name)
@@ -781,12 +775,7 @@ mod tests {
 
         let mut source_names = HashSet::new();
         for font in &fonts {
-            let source_name = font
-                .font_info
-                .style_name
-                .as_ref()
-                .map(|v| name!(v))
-                .unwrap();
+            let source_name = crate::util::guess_source_name(font).unwrap();
             source_names.insert(source_name.clone());
 
             for (set_name, set_glyphs) in &sets {
@@ -865,12 +854,7 @@ mod tests {
         let default_set = HashSet::from([name_arrowleft]);
 
         for font in [&ufo_lightwide, &ufo_lightcond] {
-            let source_name = font
-                .font_info
-                .style_name
-                .as_ref()
-                .map(|v| name!(v))
-                .unwrap();
+            let source_name = crate::util::guess_source_name(font).unwrap();
 
             fontgarden
                 .import(font, &latin_set, &name_latin, &source_name)
@@ -947,12 +931,7 @@ mod tests {
 
         for ufo_path in ufo_paths {
             let font = norad::Font::load(ufo_path).unwrap();
-            let source_name = font
-                .font_info
-                .style_name
-                .as_ref()
-                .map(|v| name!(v))
-                .unwrap();
+            let source_name = crate::util::guess_source_name(&font).unwrap();
 
             // FIXME: does not scan all layers
             let components_in_glyph = |name: Name| {

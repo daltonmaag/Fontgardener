@@ -167,11 +167,7 @@ fn import(
 
     for font in fonts {
         let font = norad::Font::load(&font).expect("can't load font");
-        let source_name = font
-            .font_info
-            .style_name
-            .as_ref()
-            .map(|v| Name::new(v).unwrap())
+        let source_name = util::guess_source_name(&font)
             .expect("need a styleName in the UFO to derive a source name from");
 
         for (set_name, import_glyphs) in &set_members {
