@@ -682,6 +682,18 @@ impl Layer {
 mod tests {
     use super::*;
 
+    macro_rules! collect_names {
+        ($($x: expr), + $(,) ?) => {
+            [$($x),+].iter().map(|n| Name::new(n).unwrap()).collect()
+        };
+    }
+
+    macro_rules! name {
+        ($e: expr) => {
+            Name::new($e).unwrap()
+        };
+    }
+
     #[test]
     fn load_empty() {
         let tempdir = tempfile::TempDir::new().unwrap();
@@ -691,12 +703,6 @@ mod tests {
         let fontgarden2 = Fontgarden::from_path(tempdir.path()).unwrap();
 
         assert_eq!(fontgarden, fontgarden2);
-    }
-
-    macro_rules! collect_names {
-        ($($x : expr), + $(,) ?) => {
-            [$($x),+].iter().map(|n| Name::new(n).unwrap()).collect()
-        };
     }
 
     #[test]
@@ -720,43 +726,23 @@ mod tests {
                 .font_info
                 .style_name
                 .as_ref()
-                .map(|v| Name::new(v).unwrap())
+                .map(|v| name!(v))
                 .unwrap();
 
             fontgarden
-                .import(
-                    &font,
-                    &latin_set,
-                    &Name::new("Latin").unwrap(),
-                    &source_name,
-                )
+                .import(&font, &latin_set, &name!("Latin"), &source_name)
                 .unwrap();
 
             fontgarden
-                .import(
-                    &font,
-                    &arrow_set,
-                    &Name::new("Arrows").unwrap(),
-                    &source_name,
-                )
+                .import(&font, &arrow_set, &name!("Arrows"), &source_name)
                 .unwrap();
 
             fontgarden
-                .import(
-                    &font,
-                    &punctuation_set,
-                    &Name::new("Punctuation").unwrap(),
-                    &source_name,
-                )
+                .import(&font, &punctuation_set, &name!("Punctuation"), &source_name)
                 .unwrap();
 
             fontgarden
-                .import(
-                    &font,
-                    &default_set,
-                    &Name::new("default").unwrap(),
-                    &source_name,
-                )
+                .import(&font, &default_set, &name!("default"), &source_name)
                 .unwrap();
         }
 
@@ -796,8 +782,8 @@ mod tests {
         let latin_glyphs: HashSet<Name> = collect_names!["A", "Aacute", "S"];
         let default_glyphs: HashSet<Name> = all_glyphs.difference(&latin_glyphs).cloned().collect();
         let sets = vec![
-            (Name::new("Latin").unwrap(), latin_glyphs),
-            (Name::new("default").unwrap(), default_glyphs),
+            (name!("Latin"), latin_glyphs),
+            (name!("default"), default_glyphs),
         ];
 
         let mut source_names = HashSet::new();
@@ -806,7 +792,7 @@ mod tests {
                 .font_info
                 .style_name
                 .as_ref()
-                .map(|v| Name::new(v).unwrap())
+                .map(|v| name!(v))
                 .unwrap();
             source_names.insert(source_name.clone());
 
@@ -877,10 +863,10 @@ mod tests {
             }
         }
 
-        let name_latin = Name::new("Latin").unwrap();
-        let name_default = Name::new("default").unwrap();
-        let name_a = Name::new("A").unwrap();
-        let name_arrowleft = Name::new("arrowleft").unwrap();
+        let name_latin = name!("Latin");
+        let name_default = name!("default");
+        let name_a = name!("A");
+        let name_arrowleft = name!("arrowleft");
 
         let latin_set = HashSet::from([name_a]);
         let default_set = HashSet::from([name_arrowleft]);
@@ -890,7 +876,7 @@ mod tests {
                 .font_info
                 .style_name
                 .as_ref()
-                .map(|v| Name::new(v).unwrap())
+                .map(|v| name!(v))
                 .unwrap();
 
             fontgarden
@@ -927,7 +913,7 @@ mod tests {
                 .font_info
                 .style_name
                 .as_ref()
-                .map(|v| Name::new(v).unwrap())
+                .map(|v| name!(v))
                 .unwrap();
 
             fontgarden
@@ -962,7 +948,7 @@ mod tests {
             "testdata/MutatorSansLightCondensed.ufo",
         ];
 
-        let set_name = Name::new("Latin").unwrap();
+        let set_name = name!("Latin");
         let glyphs: HashSet<Name> = collect_names!["Aacute"];
         let glyphs_expected: HashSet<Name> = collect_names!["A", "Aacute", "acute"];
 
@@ -972,7 +958,7 @@ mod tests {
                 .font_info
                 .style_name
                 .as_ref()
-                .map(|v| Name::new(v).unwrap())
+                .map(|v| name!(v))
                 .unwrap();
 
             // FIXME: does not scan all layers
@@ -1000,8 +986,7 @@ mod tests {
             }
         }
 
-        let source_names =
-            HashSet::from(["LightWide", "LightCondensed"].map(|n| Name::new(n).unwrap()));
+        let source_names = HashSet::from(["LightWide", "LightCondensed"].map(|n| name!(n)));
         let exports = fontgarden.export(&glyphs, &source_names).unwrap();
 
         for (font_name, font) in exports.iter() {
