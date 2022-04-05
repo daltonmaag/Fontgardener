@@ -693,8 +693,14 @@ mod tests {
         assert_eq!(fontgarden, fontgarden2);
     }
 
+    macro_rules! collect_names {
+        ($($x : expr), + $(,) ?) => {
+            [$($x),+].iter().map(|n| Name::new(n).unwrap()).collect()
+        };
+    }
+
     #[test]
-    fn roundtrip_mutatorsans() {
+    fn roundtrip_mutatorsans_save_load() {
         let mut fontgarden = Fontgarden::new();
 
         let ufo_paths = [
@@ -702,22 +708,11 @@ mod tests {
             "testdata/MutatorSansLightCondensed.ufo",
         ];
 
-        let latin_set: HashSet<Name> = ["A", "Aacute", "S"]
-            .iter()
-            .map(|n| Name::new(n).unwrap())
-            .collect();
-
-        let punctuation_set: HashSet<Name> = ["quotedblbase", "quotedblleft", "comma"]
-            .iter()
-            .map(|n| Name::new(n).unwrap())
-            .collect();
-
-        let arrow_set: HashSet<Name> = ["arrowleft"]
-            .iter()
-            .map(|n| Name::new(n).unwrap())
-            .collect();
-
-        let default_set: HashSet<Name> = ["acute"].iter().map(|n| Name::new(n).unwrap()).collect();
+        let latin_set: HashSet<Name> = collect_names!["A", "Aacute", "S"];
+        let punctuation_set: HashSet<Name> =
+            collect_names!["quotedblbase", "quotedblleft", "comma"];
+        let arrow_set: HashSet<Name> = collect_names!["arrowleft"];
+        let default_set: HashSet<Name> = collect_names!["acute"];
 
         for ufo_path in ufo_paths {
             let font = norad::Font::load(ufo_path).unwrap();
@@ -798,10 +793,7 @@ mod tests {
         }
         let all_glyphs: HashSet<Name> = fonts[0].iter_names().collect();
 
-        let latin_glyphs: HashSet<Name> = ["A", "Aacute", "S"]
-            .iter()
-            .map(|n| Name::new(n).unwrap())
-            .collect();
+        let latin_glyphs: HashSet<Name> = collect_names!["A", "Aacute", "S"];
         let default_glyphs: HashSet<Name> = all_glyphs.difference(&latin_glyphs).cloned().collect();
         let sets = vec![
             (Name::new("Latin").unwrap(), latin_glyphs),
@@ -971,9 +963,8 @@ mod tests {
         ];
 
         let set_name = Name::new("Latin").unwrap();
-        let glyphs: HashSet<Name> = HashSet::from([Name::new("Aacute").unwrap()]);
-        let glyphs_expected: HashSet<Name> =
-            HashSet::from(["A", "Aacute", "acute"].map(|n| Name::new(n).unwrap()));
+        let glyphs: HashSet<Name> = collect_names!["Aacute"];
+        let glyphs_expected: HashSet<Name> = collect_names!["A", "Aacute", "acute"];
 
         for ufo_path in ufo_paths {
             let font = norad::Font::load(ufo_path).unwrap();
