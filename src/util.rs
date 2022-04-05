@@ -63,6 +63,11 @@ pub(crate) fn load_glyph_list(path: &Path) -> Result<HashSet<Name>, std::io::Err
     Ok(names)
 }
 
+/// Resolves a glyph list to also include all glyphs referenced as a component.
+///
+/// NOTE: Silently ignores hanging components.
+///
+/// TODO: Guard against loops.
 pub(crate) fn glyphset_follow_composites(
     import_glyphs: &HashSet<Name>,
     components_in_glyph: impl Fn(Name) -> Vec<Name>,
@@ -71,7 +76,6 @@ pub(crate) fn glyphset_follow_composites(
 
     let mut stack = Vec::new();
     for name in import_glyphs.iter() {
-        // TODO: guard against loops and hanging components.
         for component in components_in_glyph(name.clone()) {
             stack.push(component);
             while let Some(component) = stack.pop() {
@@ -83,35 +87,5 @@ pub(crate) fn glyphset_follow_composites(
         assert!(stack.is_empty());
     }
 
-    discovered_glyphs
-}
-
-// TODO: Unify follow_components for fontgarden and norad::font
-pub(crate) fn ufo_follow_composites(
-    font: &norad::Font,
-    import_glyphs: &HashSet<Name>,
-) -> HashSet<Name> {
-    let mut discovered_glyphs = import_glyphs.clone();
-    let mut stack = Vec::new();
-    for name in import_glyphs.iter() {
-        let glyph = font
-            .get_glyph(name)
-            .unwrap_or_else(|| panic!("glyph {name} not in font"));
-
-        for component in &glyph.components {
-            stack.push(component);
-            // TODO: guard against loops
-            while let Some(component) = stack.pop() {
-                let new_glyph = font
-                    .get_glyph(&component.base)
-                    .unwrap_or_else(|| panic!("glyph {} not in font", &component.base));
-                discovered_glyphs.insert(new_glyph.name.clone());
-                for new_component in new_glyph.components.iter().rev() {
-                    stack.push(new_component);
-                }
-            }
-        }
-        assert!(stack.is_empty());
-    }
     discovered_glyphs
 }

@@ -946,6 +946,8 @@ mod tests {
 
     #[test]
     fn roundtrip_mutatorsans_follow_components() {
+        // TODO: Make the test use the main-level functions so we don't
+        // duplicate logic here.
         let mut fontgarden = Fontgarden::new();
 
         let ufo_paths = [
@@ -967,7 +969,13 @@ mod tests {
                 .map(|v| Name::new(v).unwrap())
                 .unwrap();
 
-            let glyphs = crate::util::ufo_follow_composites(&font, &glyphs);
+            // FIXME: does not scan all layers
+            let components_in_glyph = |name: Name| {
+                font.get_glyph(&name)
+                    .map(|g| g.components.iter().map(|c| c.base.clone()).collect())
+                    .unwrap_or_default()
+            };
+            let glyphs = crate::util::glyphset_follow_composites(&glyphs, components_in_glyph);
             fontgarden
                 .import(&font, &glyphs, &set_name, &source_name)
                 .unwrap();

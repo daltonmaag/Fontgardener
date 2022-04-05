@@ -175,7 +175,23 @@ fn import(
             .expect("need a styleName in the UFO to derive a source name from");
 
         for (set_name, import_glyphs) in &set_members {
-            let import_glyphs = util::ufo_follow_composites(&font, import_glyphs);
+            // Also import all glyphs used as components in the glyph list.
+            // TODO: Write test that exercises different layers referencing
+            // different things.
+            let mut import_glyphs = import_glyphs.clone();
+            for layer in font.layers.iter() {
+                let components_in_glyph = |name: Name| {
+                    layer
+                        .get_glyph(&name)
+                        .map(|g| g.components.iter().map(|c| c.base.clone()).collect())
+                        .unwrap_or_default()
+                };
+                import_glyphs.extend(util::glyphset_follow_composites(
+                    &import_glyphs,
+                    components_in_glyph,
+                ));
+            }
+
             fontgarden
                 .import(&font, &import_glyphs, set_name, &source_name)
                 .expect("can't import font")
