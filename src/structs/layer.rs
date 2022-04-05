@@ -15,8 +15,6 @@ use serde::{Deserialize, Serialize};
 use crate::errors::LoadLayerError;
 use crate::errors::SaveLayerError;
 
-use super::metadata::{load_color_marks, write_color_marks};
-
 #[derive(Debug, Default, PartialEq)]
 pub struct Layer {
     pub glyphs: BTreeMap<Name, norad::Glyph>,
@@ -32,7 +30,7 @@ pub struct LayerInfo {
 impl Layer {
     pub(crate) fn from_path(path: &Path) -> Result<(Self, LayerInfo), LoadLayerError> {
         let mut glyphs = BTreeMap::new();
-        let color_marks = load_color_marks(&path.join("color_marks.csv"))
+        let color_marks = Self::load_color_marks(&path.join("color_marks.csv"))
             .map_err(LoadLayerError::LoadColorMarks)?;
         let layerinfo: LayerInfo = plist::from_file(path.join("layerinfo.plist"))
             .map_err(LoadLayerError::LoadLayerInfo)?;
@@ -94,6 +92,22 @@ impl Layer {
         }
     }
 
+    fn load_color_marks(path: &Path) -> Result<BTreeMap<Name, Color>, csv::Error> {
+        let mut color_marks = BTreeMap::new();
+
+        if !path.exists() {
+            return Ok(color_marks);
+        }
+
+        let mut reader = csv::Reader::from_path(&path)?;
+        for result in reader.deserialize() {
+            let record: (Name, Color) = result?;
+            color_marks.insert(record.0, record.1);
+        }
+
+        Ok(color_marks)
+    }
+
     pub(crate) fn save(
         &self,
         layer_name: &Name,
@@ -134,8 +148,23 @@ impl Layer {
             existing_glyph_names.insert(filename.to_string_lossy().to_string());
         }
 
-        write_color_marks(&layer_path.join("color_marks.csv"), &self.color_marks)
+        Self::write_color_marks(&layer_path.join("color_marks.csv"), &self.color_marks)
             .map_err(SaveLayerError::WriteColorMarks)?;
+
+        Ok(())
+    }
+
+    fn write_color_marks(
+        path: &Path,
+        color_marks: &BTreeMap<Name, Color>,
+    ) -> Result<(), csv::Error> {
+        let mut writer = csv::Writer::from_path(&path)?;
+
+        writer.write_record(&["name", "color"])?;
+        for (name, color) in color_marks {
+            writer.serialize((name, color))?;
+        }
+        writer.flush()?;
 
         Ok(())
     }

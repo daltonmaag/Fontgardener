@@ -10,8 +10,9 @@ use crate::errors::{ExportError, LoadError, LoadSetError, SaveError, SaveSetErro
 use layer::Layer;
 use source::Source;
 
+use crate::errors::LoadGlyphDataError;
+
 mod layer;
-mod metadata;
 mod source;
 
 /// The top-level Fontgarden structure.
@@ -270,7 +271,7 @@ impl Fontgarden {
 
 impl Set {
     fn from_path(path: &Path) -> Result<Self, LoadSetError> {
-        let glyph_data = metadata::load_glyph_data(&path.join("glyph_data.csv"))
+        let glyph_data = Self::load_glyph_data(&path.join("glyph_data.csv"))
             .map_err(LoadSetError::LoadGlyphData)?;
 
         let mut sources = BTreeMap::new();
@@ -303,7 +304,7 @@ impl Set {
         let set_path = root_path.join(format!("set.{set_name}"));
         std::fs::create_dir(&set_path).map_err(SaveSetError::CreateDir)?;
 
-        metadata::write_glyph_data(&self.glyph_data, &set_path.join("glyph_data.csv"))
+        Self::write_glyph_data(&self.glyph_data, &set_path.join("glyph_data.csv"))
             .map_err(SaveSetError::WriteGlyphData)?;
 
         for (source_name, source) in &self.sources {
@@ -324,6 +325,95 @@ impl Set {
             }
         }
         glyphs
+    }
+
+    fn load_glyph_data(path: &Path) -> Result<BTreeMap<Name, GlyphRecord>, LoadGlyphDataError> {
+        let mut glyph_data = BTreeMap::new();
+        let mut reader = csv::Reader::from_path(path).map_err(LoadGlyphDataError::Csv)?;
+
+        type Record = (String, Option<String>, Option<String>, Option<String>, bool);
+        for result in reader.deserialize() {
+            let record: Record = result.map_err(LoadGlyphDataError::Csv)?;
+
+            let glyph_name = Name::new(&record.0)
+                .map_err(|e| LoadGlyphDataError::InvalidGlyphName(record.0, e))?;
+            let codepoints = match &record.2 {
+                Some(codepoints_string) => {
+                    Self::parse_codepoints(codepoints_string).map_err(|e| {
+                        LoadGlyphDataError::InvalidCodepoint(
+                            glyph_name.clone(),
+                            codepoints_string.clone(),
+                            e,
+                        )
+                    })?
+                }
+                None => Vec::new(),
+            };
+
+            glyph_data.insert(
+                glyph_name,
+                GlyphRecord {
+                    postscript_name: record.1,
+                    codepoints,
+                    opentype_category: record.3,
+                    export: record.4,
+                },
+            );
+        }
+
+        Ok(glyph_data)
+    }
+
+    // NOTE: Use anyhow::Error here because we use anyhow's Context trait in main.
+    // Something about Sync and Send.
+    fn parse_codepoints(v: &str) -> Result<Vec<char>, anyhow::Error> {
+        let mut codepoints = Vec::new();
+        let mut seen = HashSet::new();
+
+        for codepoint in v.split_whitespace() {
+            let codepoint = u32::from_str_radix(codepoint, 16)?;
+            let codepoint = char::try_from(codepoint)?;
+            if seen.insert(codepoint) {
+                codepoints.push(codepoint);
+            }
+        }
+
+        Ok(codepoints)
+    }
+
+    fn write_glyph_data(
+        glyph_data: &BTreeMap<Name, GlyphRecord>,
+        path: &Path,
+    ) -> Result<(), csv::Error> {
+        let mut writer = csv::Writer::from_path(&path)?;
+
+        writer.write_record(&[
+            "name",
+            "postscript_name",
+            "codepoints",
+            "opentype_category",
+            "export",
+        ])?;
+
+        for glyph_name in glyph_data.keys() {
+            let record = &glyph_data[glyph_name];
+            let codepoints_str: String = record
+                .codepoints
+                .iter()
+                .map(|c| format!("{:04X}", *c as usize))
+                .collect::<Vec<_>>()
+                .join(" ");
+            writer.serialize((
+                glyph_name,
+                &record.postscript_name,
+                codepoints_str,
+                &record.opentype_category,
+                record.export,
+            ))?;
+        }
+        writer.flush()?;
+
+        Ok(())
     }
 }
 
