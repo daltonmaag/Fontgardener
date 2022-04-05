@@ -1,19 +1,17 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    ffi::OsStr,
     path::Path,
+    str::FromStr,
 };
 
-use norad::Name;
+use norad::{Color, Name};
 use serde::{Deserialize, Serialize};
 
-use crate::errors::{ExportError, LoadError, LoadSetError, SaveError, SaveSetError};
-use layer::Layer;
-use source::Source;
-
-use crate::errors::LoadGlyphDataError;
-
-mod layer;
-mod source;
+use crate::errors::{
+    ExportError, LoadError, LoadGlyphDataError, LoadLayerError, LoadSetError, LoadSourceError,
+    SaveError, SaveLayerError, SaveSetError, SaveSourceError,
+};
 
 /// The top-level Fontgarden structure.
 ///
@@ -28,6 +26,25 @@ pub struct Fontgarden {
 pub struct Set {
     pub glyph_data: BTreeMap<Name, GlyphRecord>,
     pub sources: BTreeMap<Name, Source>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Source {
+    // TODO: UFO layers are ordered, export from here will always sort order.
+    // Relevant other than in testing?
+    pub layers: BTreeMap<Name, Layer>,
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct Layer {
+    pub glyphs: BTreeMap<Name, norad::Glyph>,
+    pub color_marks: BTreeMap<Name, norad::Color>,
+    pub default: bool,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct LayerInfo {
+    pub name: Name,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -410,6 +427,232 @@ impl Set {
                 &record.opentype_category,
                 record.export,
             ))?;
+        }
+        writer.flush()?;
+
+        Ok(())
+    }
+}
+
+impl Default for Source {
+    fn default() -> Self {
+        let layer = Layer {
+            default: true,
+            ..Default::default()
+        };
+        Self {
+            layers: BTreeMap::from([(Name::new("public.default").unwrap(), layer)]),
+        }
+    }
+}
+
+impl Source {
+    pub(crate) fn from_path(path: &Path) -> Result<Self, LoadSourceError> {
+        let mut layers = BTreeMap::new();
+        let mut found_default = false;
+
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            let path = entry.path();
+            if let Some(file_name) = path.file_name() {
+                let metadata = entry.metadata()?;
+                if metadata.is_dir()
+                    && (file_name == "glyphs" || file_name.to_string_lossy().starts_with("glyphs."))
+                {
+                    let (layer, layerinfo) = Layer::from_path(&path)
+                        .map_err(|e| LoadSourceError::LoadLayer(path.clone(), e))?;
+
+                    // All non-default layer names start with a dot after "glyphs".
+                    // Hope that we don't bump into filesystem case-sensitivity
+                    // issues.
+                    if file_name == "glyphs" {
+                        found_default = true;
+                    }
+                    layers.insert(layerinfo.name, layer);
+                }
+            }
+        }
+
+        if !found_default {
+            return Err(LoadSourceError::NoDefaultLayer);
+        }
+
+        Ok(Source { layers })
+    }
+
+    pub fn get_default_layer_mut(&mut self) -> &mut Layer {
+        self.layers
+            .values_mut()
+            .find(|layer| layer.default)
+            .unwrap()
+    }
+
+    pub fn get_or_create_layer(&mut self, name: Name) -> &mut Layer {
+        self.layers.entry(name).or_default()
+    }
+
+    pub fn new_with_default_layer_name(name: Name) -> Self {
+        let layer = Layer {
+            default: true,
+            ..Default::default()
+        };
+        Self {
+            layers: BTreeMap::from([(name, layer)]),
+        }
+    }
+
+    pub(crate) fn save(&self, source_name: &str, set_path: &Path) -> Result<(), SaveSourceError> {
+        let source_path = set_path.join(format!("source.{source_name}"));
+        std::fs::create_dir(&source_path).map_err(SaveSourceError::CreateDir)?;
+
+        let mut existing_layer_names = HashSet::new();
+        for (layer_name, layer) in &self.layers {
+            layer
+                .save(layer_name, &source_path, &mut existing_layer_names)
+                .map_err(|e| SaveSourceError::SaveLayer(layer_name.clone(), e))?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Layer {
+    pub(crate) fn from_path(path: &Path) -> Result<(Self, LayerInfo), LoadLayerError> {
+        let mut glyphs = BTreeMap::new();
+        let color_marks = Self::load_color_marks(&path.join("color_marks.csv"))
+            .map_err(LoadLayerError::LoadColorMarks)?;
+        let layerinfo: LayerInfo = plist::from_file(path.join("layerinfo.plist"))
+            .map_err(LoadLayerError::LoadLayerInfo)?;
+
+        for entry in std::fs::read_dir(path)? {
+            let path = entry?.path();
+            if path.is_file() && path.extension().map_or(false, |n| n == "glif") {
+                let glif = norad::Glyph::load(&path)
+                    .map_err(|e| LoadLayerError::LoadGlyph(path.clone(), e))?;
+                glyphs.insert(glif.name.clone(), glif);
+            }
+        }
+
+        Ok((
+            Layer {
+                glyphs,
+                color_marks,
+                default: path.file_name() == Some(OsStr::new("glyphs")),
+            },
+            layerinfo,
+        ))
+    }
+
+    pub(crate) fn from_ufo_layer(layer: &norad::Layer, glyph_names: &HashSet<Name>) -> Self {
+        let mut glyphs = BTreeMap::new();
+        let mut color_marks = BTreeMap::new();
+
+        for glyph in layer
+            .iter()
+            .filter(|g| glyph_names.contains(g.name.as_str()))
+        {
+            let mut our_glyph = glyph.clone();
+            if let Some(color_string) = our_glyph.lib.remove("public.markColor") {
+                // FIXME: We roundtrip color here so that we round up front to
+                // make roundtrip equality testing easier.
+                let our_color = Color::from_str(color_string.as_string().unwrap()).unwrap();
+                let our_color = Color::from_str(&our_color.to_rgba_string()).unwrap();
+                color_marks.insert(glyph.name.clone(), our_color);
+            }
+            // TODO: split out the codepoints.
+            glyphs.insert(glyph.name.clone(), our_glyph);
+        }
+
+        Self {
+            glyphs,
+            color_marks,
+            default: false,
+        }
+    }
+
+    pub(crate) fn into_ufo_layer(self, ufo_layer: &mut norad::Layer) {
+        for (name, mut glyph) in self.glyphs {
+            if let Some(c) = self.color_marks.get(&name) {
+                glyph
+                    .lib
+                    .insert("public.markColor".into(), c.to_rgba_string().into());
+            }
+            ufo_layer.insert_glyph(glyph);
+        }
+    }
+
+    fn load_color_marks(path: &Path) -> Result<BTreeMap<Name, Color>, csv::Error> {
+        let mut color_marks = BTreeMap::new();
+
+        if !path.exists() {
+            return Ok(color_marks);
+        }
+
+        let mut reader = csv::Reader::from_path(&path)?;
+        for result in reader.deserialize() {
+            let record: (Name, Color) = result?;
+            color_marks.insert(record.0, record.1);
+        }
+
+        Ok(color_marks)
+    }
+
+    pub(crate) fn save(
+        &self,
+        layer_name: &Name,
+        source_path: &Path,
+        existing_layer_names: &mut HashSet<String>,
+    ) -> Result<(), SaveLayerError> {
+        if self.glyphs.is_empty() {
+            return Ok(());
+        }
+
+        let layer_path = if self.default {
+            source_path.join("glyphs")
+        } else {
+            let path = source_path.join(norad::util::default_file_name_for_layer_name(
+                layer_name,
+                existing_layer_names,
+            ));
+            existing_layer_names.insert(path.to_string_lossy().to_string());
+            path
+        };
+        std::fs::create_dir(&layer_path).map_err(SaveLayerError::CreateDir)?;
+
+        plist::to_file_xml(
+            layer_path.join("layerinfo.plist"),
+            &LayerInfo {
+                name: layer_name.clone(),
+            },
+        )
+        .map_err(SaveLayerError::WriteLayerInfo)?;
+
+        let mut existing_glyph_names = HashSet::new();
+        for (glyph_name, glyph) in &self.glyphs {
+            let filename =
+                norad::util::default_file_name_for_glyph_name(glyph_name, &existing_glyph_names);
+            let glyph_path = layer_path.join(&filename);
+            glyph
+                .save(&glyph_path)
+                .map_err(|e| SaveLayerError::SaveGlyph(glyph_name.clone(), e))?;
+            existing_glyph_names.insert(filename.to_string_lossy().to_string());
+        }
+
+        Self::write_color_marks(&layer_path.join("color_marks.csv"), &self.color_marks)
+            .map_err(SaveLayerError::WriteColorMarks)?;
+
+        Ok(())
+    }
+
+    fn write_color_marks(
+        path: &Path,
+        color_marks: &BTreeMap<Name, Color>,
+    ) -> Result<(), csv::Error> {
+        let mut writer = csv::Writer::from_path(&path)?;
+
+        writer.write_record(&["name", "color"])?;
+        for (name, color) in color_marks {
+            writer.serialize((name, color))?;
         }
         writer.flush()?;
 
