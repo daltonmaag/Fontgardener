@@ -714,16 +714,14 @@ mod tests {
             norad::Font::load("testdata/MutatorSansLightCondensed.ufo").unwrap(),
         ];
 
-        let latin_set: HashSet<Name> = collect_names!["A", "Aacute", "S"];
-        let punctuation_set: HashSet<Name> =
-            collect_names!["quotedblbase", "quotedblleft", "comma"];
-        let arrow_set: HashSet<Name> = collect_names!["arrowleft"];
-        let default_set: HashSet<Name> = collect_names!["acute"];
         let sets = vec![
-            (name!("Latin"), latin_set),
-            (name!("Arrows"), arrow_set),
-            (name!("Punctuation"), punctuation_set),
-            (name!("default"), default_set),
+            (name!("Latin"), collect_names!["A", "Aacute", "S"]),
+            (
+                name!("Arrows"),
+                collect_names!["quotedblbase", "quotedblleft", "comma"],
+            ),
+            (name!("Punctuation"), collect_names!["arrowleft"]),
+            (name!("default"), collect_names!["acute"]),
         ];
 
         for font in &fonts {
@@ -757,6 +755,7 @@ mod tests {
         fontgarden.save(tempdir.path()).unwrap();
         let fontgarden2 = Fontgarden::from_path(tempdir.path()).unwrap();
 
+        // TODO: write per-field assert_eq for easier diffs.
         assert_eq!(fontgarden, fontgarden2);
     }
 
