@@ -709,9 +709,9 @@ mod tests {
     fn roundtrip_mutatorsans_save_load() {
         let mut fontgarden = Fontgarden::new();
 
-        let ufo_paths = [
-            "testdata/MutatorSansLightWide.ufo",
-            "testdata/MutatorSansLightCondensed.ufo",
+        let fonts = [
+            norad::Font::load("testdata/MutatorSansLightWide.ufo").unwrap(),
+            norad::Font::load("testdata/MutatorSansLightCondensed.ufo").unwrap(),
         ];
 
         let latin_set: HashSet<Name> = collect_names!["A", "Aacute", "S"];
@@ -719,9 +719,14 @@ mod tests {
             collect_names!["quotedblbase", "quotedblleft", "comma"];
         let arrow_set: HashSet<Name> = collect_names!["arrowleft"];
         let default_set: HashSet<Name> = collect_names!["acute"];
+        let sets = vec![
+            (name!("Latin"), latin_set),
+            (name!("Arrows"), arrow_set),
+            (name!("Punctuation"), punctuation_set),
+            (name!("default"), default_set),
+        ];
 
-        for ufo_path in ufo_paths {
-            let font = norad::Font::load(ufo_path).unwrap();
+        for font in &fonts {
             let source_name = font
                 .font_info
                 .style_name
@@ -729,26 +734,12 @@ mod tests {
                 .map(|v| name!(v))
                 .unwrap();
 
-            fontgarden
-                .import(&font, &latin_set, &name!("Latin"), &source_name)
-                .unwrap();
-
-            fontgarden
-                .import(&font, &arrow_set, &name!("Arrows"), &source_name)
-                .unwrap();
-
-            fontgarden
-                .import(&font, &punctuation_set, &name!("Punctuation"), &source_name)
-                .unwrap();
-
-            fontgarden
-                .import(&font, &default_set, &name!("default"), &source_name)
-                .unwrap();
+            for (set_name, set_glyphs) in &sets {
+                fontgarden
+                    .import(font, set_glyphs, set_name, &source_name)
+                    .unwrap();
+            }
         }
-
-        let tempdir = tempfile::tempdir().unwrap();
-        fontgarden.save(tempdir.path()).unwrap();
-        let fontgarden2 = Fontgarden::from_path(tempdir.path()).unwrap();
 
         for set in fontgarden.sets.values() {
             for source in set.sources.values() {
@@ -762,7 +753,10 @@ mod tests {
             }
         }
 
-        use pretty_assertions::assert_eq;
+        let tempdir = tempfile::tempdir().unwrap();
+        fontgarden.save(tempdir.path()).unwrap();
+        let fontgarden2 = Fontgarden::from_path(tempdir.path()).unwrap();
+
         assert_eq!(fontgarden, fontgarden2);
     }
 
