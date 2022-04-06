@@ -599,6 +599,19 @@ impl Layer {
         }
     }
 
+    // NOTE: Keep in sync with into_ufo_layer.
+    // TODO: Make a proper to-norad export API and dogfood it.
+    #[cfg(test)]
+    pub(crate) fn export_glyph(&self, name: &str) -> norad::Glyph {
+        let mut glyph = self.glyphs[name].clone();
+        if let Some(c) = self.color_marks.get(name) {
+            glyph
+                .lib
+                .insert("public.markColor".into(), c.to_rgba_string().into());
+        }
+        glyph
+    }
+
     fn load_color_marks(path: &Path) -> Result<BTreeMap<Name, Color>, csv::Error> {
         let mut color_marks = BTreeMap::new();
 
@@ -834,87 +847,65 @@ mod tests {
     fn update_sets() {
         let mut fontgarden = Fontgarden::new();
 
-        let mut ufo_lightwide = norad::Font::load("testdata/MutatorSansLightWide.ufo").unwrap();
-        let mut ufo_lightcond =
-            norad::Font::load("testdata/MutatorSansLightCondensed.ufo").unwrap();
+        let (mut ufo1, mut ufo2) = (
+            norad::Font::load("testdata/MutatorSansLightWide.ufo").unwrap(),
+            norad::Font::load("testdata/MutatorSansLightCondensed.ufo").unwrap(),
+        );
 
-        // TODO: compare glyphs differently so color marks don't matter.
-        for ufo in [&mut ufo_lightwide, &mut ufo_lightcond] {
-            let layer_names: Vec<_> = ufo.layers.iter().map(|l| l.name()).cloned().collect();
-            for layer_name in layer_names {
-                let layer = ufo.layers.get_mut(&layer_name).unwrap();
-                for glyph in layer.iter_mut() {
-                    glyph.lib.remove("public.markColor");
-                }
+        let sets = vec![
+            (name!("Latin"), collect_names!["A"]),
+            (name!("default"), collect_names!["arrowleft"]),
+        ];
+
+        for font in [&ufo1, &ufo2] {
+            let source_name = crate::util::guess_source_name(font).unwrap();
+
+            for (set_name, set_glyphs) in &sets {
+                fontgarden
+                    .import(font, set_glyphs, set_name, &source_name)
+                    .unwrap();
             }
         }
 
-        let name_latin = name!("Latin");
-        let name_default = name!("default");
-        let name_a = name!("A");
-        let name_arrowleft = name!("arrowleft");
-
-        let latin_set = HashSet::from([name_a]);
-        let default_set = HashSet::from([name_arrowleft]);
-
-        for font in [&ufo_lightwide, &ufo_lightcond] {
-            let source_name = crate::util::guess_source_name(font).unwrap();
-
-            fontgarden
-                .import(font, &latin_set, &name_latin, &source_name)
-                .unwrap();
-            fontgarden
-                .import(font, &default_set, &name_default, &source_name)
-                .unwrap();
-        }
-
-        assert_eq!(
-            &fontgarden.sets["Latin"].sources["LightWide"].layers["foreground"].glyphs["A"],
-            ufo_lightwide.get_glyph("A").unwrap()
+        // Assert the imported glyphs are the same as the UFO ones.
+        assert_glyph_eq(
+            ufo1.get_glyph("A").unwrap(),
+            &fontgarden.sets["Latin"].sources["LightWide"].layers["foreground"].export_glyph("A"),
         );
-        assert_eq!(
-            &fontgarden.sets["default"].sources["LightCondensed"].layers["foreground"].glyphs
-                ["arrowleft"],
-            ufo_lightcond.get_glyph("arrowleft").unwrap()
+        assert_glyph_eq(
+            ufo2.get_glyph("arrowleft").unwrap(),
+            &fontgarden.sets["default"].sources["LightCondensed"].layers["foreground"]
+                .export_glyph("arrowleft"),
         );
 
-        ufo_lightwide
-            .get_glyph_mut("A")
+        // Modify the glyphs in the UFOs.
+        ufo1.get_glyph_mut("A")
             .unwrap()
             .lib
-            .insert("aaaa".into(), 1.into());
-        ufo_lightcond
-            .get_glyph_mut("arrowleft")
+            .insert("public.markColor".into(), "1,1,1,1".into());
+        ufo2.get_glyph_mut("arrowleft")
             .unwrap()
             .lib
             .insert("bbbb".into(), 1.into());
 
-        for font in [&ufo_lightwide, &ufo_lightcond] {
-            let source_name = font
-                .font_info
-                .style_name
-                .as_ref()
-                .map(|v| name!(v))
-                .unwrap();
-
+        // Reimporting the glyphs into any one set should update them in the set
+        // they are in already.
+        let both_glyphs = collect_names!["A", "arrowleft"];
+        for font in [&ufo1, &ufo2] {
+            let source_name = crate::util::guess_source_name(font).unwrap();
             fontgarden
-                .import(
-                    font,
-                    &latin_set.union(&default_set).cloned().collect(),
-                    &name_latin,
-                    &source_name,
-                )
+                .import(font, &both_glyphs, &sets[0].0, &source_name)
                 .unwrap();
         }
 
-        assert_eq!(
-            &fontgarden.sets["Latin"].sources["LightWide"].layers["foreground"].glyphs["A"],
-            ufo_lightwide.get_glyph("A").unwrap()
+        assert_glyph_eq(
+            ufo1.get_glyph("A").unwrap(),
+            &fontgarden.sets["Latin"].sources["LightWide"].layers["foreground"].export_glyph("A"),
         );
-        assert_eq!(
-            &fontgarden.sets["default"].sources["LightCondensed"].layers["foreground"].glyphs
-                ["arrowleft"],
-            ufo_lightcond.get_glyph("arrowleft").unwrap()
+        assert_glyph_eq(
+            ufo2.get_glyph("arrowleft").unwrap(),
+            &fontgarden.sets["default"].sources["LightCondensed"].layers["foreground"]
+                .export_glyph("arrowleft"),
         );
     }
 
