@@ -872,32 +872,21 @@ mod tests {
 
     #[test]
     fn follow_components() {
-        // TODO: Make the test use the main-level functions so we don't
-        // duplicate logic here.
         let mut fontgarden = Fontgarden::new();
 
-        let ufo_paths = [
-            "testdata/MutatorSansLightWide.ufo",
-            "testdata/MutatorSansLightCondensed.ufo",
+        let fonts = [
+            norad::Font::load("testdata/MutatorSansLightWide.ufo").unwrap(),
+            norad::Font::load("testdata/MutatorSansLightCondensed.ufo").unwrap(),
         ];
 
         let set_name = name!("Latin");
-        let glyphs: HashSet<Name> = collect_names!["Aacute"];
-        let glyphs_expected: HashSet<Name> = collect_names!["A", "Aacute", "acute"];
+        let set_glyphs = collect_names!["Aacute"];
+        let set_glyphs_expected: HashSet<Name> = collect_names!["A", "Aacute", "acute"];
 
-        for ufo_path in ufo_paths {
-            let font = norad::Font::load(ufo_path).unwrap();
-            let source_name = crate::util::guess_source_name(&font).unwrap();
-
-            // FIXME: does not scan all layers
-            let components_in_glyph = |name: Name| {
-                font.get_glyph(&name)
-                    .map(|g| g.components.iter().map(|c| c.base.clone()).collect())
-                    .unwrap_or_default()
-            };
-            let glyphs = crate::util::glyphset_follow_composites(&glyphs, components_in_glyph);
+        for font in &fonts {
+            let source_name = crate::util::guess_source_name(font).unwrap();
             fontgarden
-                .import(&font, &glyphs, &set_name, &source_name)
+                .import(font, &set_glyphs, &set_name, &source_name)
                 .unwrap();
         }
 
@@ -907,7 +896,7 @@ mod tests {
                     assert!(
                         // Some layers may contain the "A" but not the "Aacute".
                         HashSet::from_iter(layer.glyphs.keys().cloned())
-                            .is_subset(&glyphs_expected),
+                            .is_subset(&set_glyphs_expected),
                         "Set {set_name}, source {source_name}, layer {layer_name}"
                     );
                 }
@@ -915,14 +904,14 @@ mod tests {
         }
 
         let source_names = collect_names!["LightWide", "LightCondensed"];
-        let exports = fontgarden.export(&glyphs, &source_names).unwrap();
+        let exports = fontgarden.export(&set_glyphs, &source_names).unwrap();
 
         for (font_name, font) in exports.iter() {
             for layer in font.layers.iter() {
                 assert!(
                     // Some layers may contain the "A" but not the "Aacute".
                     HashSet::from_iter(layer.iter().map(|g| g.name.clone()))
-                        .is_subset(&glyphs_expected),
+                        .is_subset(&set_glyphs_expected),
                     "Font {font_name}, layer {}",
                     layer.name()
                 );
