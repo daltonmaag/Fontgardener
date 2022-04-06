@@ -245,18 +245,34 @@ impl Fontgarden {
     ) -> Result<BTreeMap<Name, norad::Font>, ExportError> {
         let mut ufos: BTreeMap<Name, norad::Font> = BTreeMap::new();
 
-        // First, make a copy of self and prune sources and glyphs not in the
-        // export sets.
+        // First, make a copy of self and resolve the glyph list to include all
+        // referenced components. Make the union set up front across all layers
+        // because not every layer by itself contains all glyphs.
+        //
+        // TODO: Be smarter by resolving from the Fontgarden instead of making a
+        // copy of self and then pruning it?
         let mut sources = self.assemble_sources(source_names);
-        for source in sources.values_mut() {
-            for layer in source.layers.values_mut() {
-                let glyph_names = crate::util::glyphset_follow_composites(glyph_names, |n| {
+        let mut glyph_names = glyph_names.clone();
+        for source in sources.values() {
+            for layer in source.layers.values() {
+                let components_in_glyph = |n| {
                     layer
                         .glyphs
                         .get(&n)
                         .map(|g| g.components.iter().map(|c| c.base.clone()).collect())
                         .unwrap_or_default()
-                });
+                };
+
+                glyph_names.extend(crate::util::glyphset_follow_composites(
+                    &glyph_names,
+                    components_in_glyph,
+                ));
+            }
+        }
+
+        // Next, prune sources and glyphs not in the resolved glyph list.
+        for source in sources.values_mut() {
+            for layer in source.layers.values_mut() {
                 layer.glyphs.retain(|name, _| glyph_names.contains(name));
                 layer
                     .color_marks
@@ -872,6 +888,8 @@ mod tests {
 
     #[test]
     fn follow_components() {
+        use pretty_assertions::assert_eq;
+
         let mut fontgarden = Fontgarden::new();
 
         let fonts = [
@@ -879,44 +897,71 @@ mod tests {
             norad::Font::load("testdata/MutatorSansLightCondensed.ufo").unwrap(),
         ];
 
-        let set_name = name!("Latin");
-        let set_glyphs = collect_names!["Aacute"];
-        let set_glyphs_expected: HashSet<Name> = collect_names!["A", "Aacute", "acute"];
+        let sets = vec![
+            (name!("Latin"), collect_names!["Aacute"]),
+            (name!("Punctuation"), collect_names!["semicolon"]),
+        ];
+        let all_glyphs: HashSet<Name> = collect_names!["Aacute", "semicolon"];
 
         for font in &fonts {
             let source_name = crate::util::guess_source_name(font).unwrap();
-            fontgarden
-                .import(font, &set_glyphs, &set_name, &source_name)
-                .unwrap();
-        }
-
-        for (set_name, set) in fontgarden.sets.iter() {
-            for (source_name, source) in set.sources.iter() {
-                for (layer_name, layer) in source.layers.iter() {
-                    assert!(
-                        // Some layers may contain the "A" but not the "Aacute".
-                        HashSet::from_iter(layer.glyphs.keys().cloned())
-                            .is_subset(&set_glyphs_expected),
-                        "Set {set_name}, source {source_name}, layer {layer_name}"
-                    );
-                }
+            for (set_name, set_glyphs) in &sets {
+                fontgarden
+                    .import(font, set_glyphs, set_name, &source_name)
+                    .unwrap();
             }
         }
+
+        assert_eq!(
+            vec![
+                (
+                    "Latin",
+                    "LightCondensed",
+                    "foreground",
+                    vec!["A", "Aacute", "acute"],
+                ),
+                ("Latin", "LightCondensed", "support", vec!["A"]),
+                (
+                    "Latin",
+                    "LightWide",
+                    "foreground",
+                    vec!["A", "Aacute", "acute"],
+                ),
+                (
+                    "Punctuation",
+                    "LightCondensed",
+                    "foreground",
+                    vec!["comma", "period", "semicolon"],
+                ),
+                (
+                    "Punctuation",
+                    "LightWide",
+                    "foreground",
+                    vec!["comma", "period", "semicolon"],
+                ),
+            ],
+            glyphs_of_fontgarden(&fontgarden),
+        );
 
         let source_names = collect_names!["LightWide", "LightCondensed"];
-        let exports = fontgarden.export(&set_glyphs, &source_names).unwrap();
+        let exports = fontgarden.export(&all_glyphs, &source_names).unwrap();
 
-        for (font_name, font) in exports.iter() {
-            for layer in font.layers.iter() {
-                assert!(
-                    // Some layers may contain the "A" but not the "Aacute".
-                    HashSet::from_iter(layer.iter().map(|g| g.name.clone()))
-                        .is_subset(&set_glyphs_expected),
-                    "Font {font_name}, layer {}",
-                    layer.name()
-                );
-            }
-        }
+        assert_eq!(
+            vec![
+                (
+                    "LightCondensed",
+                    "foreground",
+                    vec!["A", "Aacute", "acute", "comma", "period", "semicolon"]
+                ),
+                ("LightCondensed", "support", vec!["A"]),
+                (
+                    "LightWide",
+                    "foreground",
+                    vec!["A", "Aacute", "acute", "comma", "period", "semicolon"]
+                )
+            ],
+            glyphs_of_exported_fonts(&exports),
+        );
     }
 
     /// Roundtrip UFO colors to make equality testing easier, because we
@@ -935,6 +980,43 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn glyphs_of_fontgarden(fontgarden: &Fontgarden) -> Vec<(&str, &str, &str, Vec<&str>)> {
+        let mut contents = Vec::new();
+
+        for (set_name, set) in fontgarden.sets.iter() {
+            for (source_name, source) in set.sources.iter() {
+                for (layer_name, layer) in source.layers.iter() {
+                    contents.push((
+                        set_name.as_ref(),
+                        source_name.as_ref(),
+                        layer_name.as_ref(),
+                        layer.glyphs.keys().map(|k| k.as_ref()).collect(),
+                    ));
+                }
+            }
+        }
+
+        contents
+    }
+
+    fn glyphs_of_exported_fonts(
+        fonts: &BTreeMap<Name, norad::Font>,
+    ) -> Vec<(&str, &str, Vec<&str>)> {
+        let mut contents = Vec::new();
+
+        for (font_name, font) in fonts.iter() {
+            for layer in font.layers.iter() {
+                contents.push((
+                    font_name.as_ref(),
+                    layer.name().as_ref(),
+                    layer.iter().map(|g| g.name.as_ref()).collect(),
+                ));
+            }
+        }
+
+        contents
     }
 
     fn assert_font_eq(reference: &norad::Font, other: &norad::Font) {

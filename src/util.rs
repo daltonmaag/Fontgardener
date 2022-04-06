@@ -67,7 +67,8 @@ pub(crate) fn load_glyph_list(path: &Path) -> Result<HashSet<Name>, std::io::Err
 ///
 /// NOTE: Silently ignores hanging components.
 ///
-/// TODO: Guard against loops.
+/// TODO: Guard against loops. Or do we already?
+/// TODO: Be smarter by skipping glyphs already discovered?
 pub(crate) fn glyphset_follow_composites(
     import_glyphs: &HashSet<Name>,
     components_in_glyph: impl Fn(Name) -> Vec<Name>,
@@ -76,11 +77,11 @@ pub(crate) fn glyphset_follow_composites(
 
     let mut stack = Vec::new();
     for name in import_glyphs.iter() {
-        for component in components_in_glyph(name.clone()) {
-            stack.push(component);
-            while let Some(component) = stack.pop() {
-                let new_components = components_in_glyph(component);
-                discovered_glyphs.extend(new_components.iter().cloned());
+        stack.extend(components_in_glyph(name.clone()));
+        while let Some(component) = stack.pop() {
+            // TODO: are we properly preventing looping or repeat checking?
+            if discovered_glyphs.insert(component.clone()) {
+                let new_components = components_in_glyph(component.clone());
                 stack.extend(new_components.into_iter().rev())
             }
         }
