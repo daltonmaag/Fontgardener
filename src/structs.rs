@@ -719,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_mutatorsans_save_load() {
+    fn save_load() {
         let mut fontgarden = Fontgarden::new();
 
         let fonts = [
@@ -767,7 +767,7 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_mutatorsans_export_import() {
+    fn export_import() {
         let mut fontgarden = Fontgarden::new();
 
         let mut fonts = [
@@ -802,45 +802,6 @@ mod tests {
 
         assert_font_eq(&fonts[0], &roundtripped_ufos["LightWide"]);
         assert_font_eq(&fonts[1], &roundtripped_ufos["LightCondensed"]);
-    }
-
-    /// Roundtrip UFO colors to make equality testing easier.
-    fn scrub_colors(font: &mut norad::Font) {
-        let layer_names: Vec<_> = font.layers.iter().map(|l| l.name()).cloned().collect();
-        for layer_name in layer_names {
-            let layer = font.layers.get_mut(&layer_name).unwrap();
-            for glyph in layer.iter_mut() {
-                if let Some(color_string) = glyph.lib.remove("public.markColor") {
-                    let our_color = Color::from_str(color_string.as_string().unwrap()).unwrap();
-                    let our_color = Color::from_str(&our_color.to_rgba_string()).unwrap();
-                    glyph
-                        .lib
-                        .insert("public.markColor".into(), our_color.to_rgba_string().into());
-                }
-            }
-        }
-    }
-
-    fn assert_font_eq(reference: &norad::Font, other: &norad::Font) {
-        // NOTE: goes over individual fields and glyphs to have finer grained
-        // and faster diffs. Big diffs == slow.
-        //
-        // TODO: compare more than glyphs.
-        for reference_layer in reference.layers.iter() {
-            let other_layer = other.layers.get(reference_layer.name()).unwrap();
-
-            assert_eq!(reference_layer.len(), other_layer.len());
-            for reference in reference_layer.iter() {
-                let other = other_layer.get_glyph(&reference.name).unwrap();
-                assert_glyph_eq(reference, other);
-            }
-        }
-    }
-
-    fn assert_glyph_eq(reference: &norad::Glyph, other: &norad::Glyph) {
-        use pretty_assertions::assert_eq;
-
-        assert_eq!(reference, other);
     }
 
     #[test]
@@ -910,7 +871,7 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_mutatorsans_follow_components() {
+    fn follow_components() {
         // TODO: Make the test use the main-level functions so we don't
         // duplicate logic here.
         let mut fontgarden = Fontgarden::new();
@@ -953,7 +914,7 @@ mod tests {
             }
         }
 
-        let source_names = HashSet::from(["LightWide", "LightCondensed"].map(|n| name!(n)));
+        let source_names = collect_names!["LightWide", "LightCondensed"];
         let exports = fontgarden.export(&glyphs, &source_names).unwrap();
 
         for (font_name, font) in exports.iter() {
@@ -967,5 +928,45 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Roundtrip UFO colors to make equality testing easier, because we
+    /// currently clip color precision.
+    fn scrub_colors(font: &mut norad::Font) {
+        let layer_names: Vec<_> = font.layers.iter().map(|l| l.name()).cloned().collect();
+        for layer_name in layer_names {
+            let layer = font.layers.get_mut(&layer_name).unwrap();
+            for glyph in layer.iter_mut() {
+                if let Some(color_string) = glyph.lib.remove("public.markColor") {
+                    let our_color = Color::from_str(color_string.as_string().unwrap()).unwrap();
+                    let our_color = Color::from_str(&our_color.to_rgba_string()).unwrap();
+                    glyph
+                        .lib
+                        .insert("public.markColor".into(), our_color.to_rgba_string().into());
+                }
+            }
+        }
+    }
+
+    fn assert_font_eq(reference: &norad::Font, other: &norad::Font) {
+        // NOTE: goes over individual fields and glyphs to have finer grained
+        // and faster diffs. Big diffs == slow.
+        //
+        // TODO: compare more than glyphs.
+        for reference_layer in reference.layers.iter() {
+            let other_layer = other.layers.get(reference_layer.name()).unwrap();
+
+            assert_eq!(reference_layer.len(), other_layer.len());
+            for reference in reference_layer.iter() {
+                let other = other_layer.get_glyph(&reference.name).unwrap();
+                assert_glyph_eq(reference, other);
+            }
+        }
+    }
+
+    fn assert_glyph_eq(reference: &norad::Glyph, other: &norad::Glyph) {
+        use pretty_assertions::assert_eq;
+
+        assert_eq!(reference, other);
     }
 }
