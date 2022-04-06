@@ -813,17 +813,21 @@ mod tests {
         // and faster diffs. Big diffs == slow.
         //
         // TODO: compare more than glyphs.
-        use pretty_assertions::assert_eq;
-
         for reference_layer in reference.layers.iter() {
             let other_layer = other.layers.get(reference_layer.name()).unwrap();
 
             assert_eq!(reference_layer.len(), other_layer.len());
             for reference in reference_layer.iter() {
                 let other = other_layer.get_glyph(&reference.name).unwrap();
-                assert_eq!(reference, other);
+                assert_glyph_eq(reference, other);
             }
         }
+    }
+
+    fn assert_glyph_eq(reference: &norad::Glyph, other: &norad::Glyph) {
+        use pretty_assertions::assert_eq;
+
+        assert_eq!(reference, other);
     }
 
     #[test]
