@@ -7,6 +7,7 @@ use norad::Name;
 
 use crate::structs::GlyphRecord;
 
+// TODO: Refactor to return errors
 pub(crate) fn extract_glyph_data(
     font: &norad::Font,
     glyphs: &HashSet<Name>,
@@ -53,6 +54,7 @@ pub(crate) fn extract_glyph_data(
     glyph_data
 }
 
+// TODO: Refactor to return errors
 pub(crate) fn load_glyph_list(path: &Path) -> Result<HashSet<Name>, std::io::Error> {
     let names: HashSet<Name> = std::fs::read_to_string(path)?
         .lines()
