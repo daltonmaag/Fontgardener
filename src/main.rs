@@ -146,6 +146,7 @@ fn import(
         // When only set names are specified, take the glyph names to
         // import from the Fontgarden itself. An unknown set name is
         // therefore an error.
+        // TODO: Should we then take all the glyph names found in all UFOs?
         for set_name in sets.iter() {
             match fontgarden.sets.get(set_name) {
                 Some(set) => {
@@ -155,10 +156,7 @@ fn import(
                 None => {
                     error_and_exit(
                         clap::ErrorKind::ValueValidation,
-                        concat!(
-                            "Cannot find set named '{set_name}'. ",
-                            "To define a new set, use the --glyphs-file argument."
-                        ),
+                        format!("Cannot find set named '{}'. To define a new set, use the --glyphs-file argument.", set_name),
                     );
                 }
             }
