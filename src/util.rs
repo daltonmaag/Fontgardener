@@ -34,7 +34,10 @@ pub(crate) fn extract_glyph_data(
 
     for name in glyphs {
         let mut record = GlyphRecord {
-            codepoints: font.get_glyph(name).unwrap().codepoints.clone(),
+            codepoints: font
+                .get_glyph(name)
+                .map(|g| g.codepoints.clone())
+                .unwrap_or_default(),
             ..Default::default()
         };
         if let Some(postscript_name) = postscript_names.get(name) {
