@@ -67,7 +67,7 @@ enum Commands {
         glyphs_file: Option<PathBuf>,
 
         /// Sources to export glyphs for [default: all]
-        #[clap(long, value_name = "SOURCE_NAME")]
+        #[clap(long = "source-name", value_name = "SOURCE_NAME")]
         source_names: Vec<Name>,
 
         /// Directory to export into [default: current dir].
