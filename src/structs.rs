@@ -563,7 +563,7 @@ impl Layer {
             if path.is_file() && path.extension().map_or(false, |n| n == "glif") {
                 let glif = norad::Glyph::load(&path)
                     .map_err(|e| LoadLayerError::LoadGlyph(path.clone(), e))?;
-                glyphs.insert(glif.name.clone(), glif);
+                glyphs.insert(glif.name().clone(), glif);
             }
         }
 
@@ -583,7 +583,7 @@ impl Layer {
 
         for glyph in layer
             .iter()
-            .filter(|g| glyph_names.contains(g.name.as_str()))
+            .filter(|g| glyph_names.contains(g.name().as_str()))
         {
             let mut our_glyph = glyph.clone();
             if let Some(color_string) = our_glyph.lib.remove("public.markColor") {
@@ -591,10 +591,10 @@ impl Layer {
                 // make roundtrip equality testing easier.
                 let our_color = Color::from_str(color_string.as_string().unwrap()).unwrap();
                 let our_color = Color::from_str(&our_color.to_rgba_string()).unwrap();
-                color_marks.insert(glyph.name.clone(), our_color);
+                color_marks.insert(glyph.name().clone(), our_color);
             }
             // TODO: split out the codepoints.
-            glyphs.insert(glyph.name.clone(), our_glyph);
+            glyphs.insert(glyph.name().clone(), our_glyph);
         }
 
         Self {
@@ -657,7 +657,7 @@ impl Layer {
         let layer_path = if self.default {
             source_path.join("glyphs")
         } else {
-            let path = source_path.join(norad::util::default_file_name_for_layer_name(
+            let path = source_path.join(crate::util::default_file_name_for_layer_name(
                 layer_name,
                 existing_layer_names,
             ));
@@ -677,7 +677,7 @@ impl Layer {
         let mut existing_glyph_names = HashSet::new();
         for (glyph_name, glyph) in &self.glyphs {
             let filename =
-                norad::util::default_file_name_for_glyph_name(glyph_name, &existing_glyph_names);
+                crate::util::default_file_name_for_glyph_name(glyph_name, &existing_glyph_names);
             let glyph_path = layer_path.join(&filename);
             glyph
                 .save(&glyph_path)
@@ -1011,7 +1011,7 @@ mod tests {
                 contents.push((
                     font_name.as_ref(),
                     layer.name().as_ref(),
-                    layer.iter().map(|g| g.name.as_ref()).collect(),
+                    layer.iter().map(|g| g.name().as_ref()).collect(),
                 ));
             }
         }
@@ -1029,7 +1029,7 @@ mod tests {
 
             assert_eq!(reference_layer.len(), other_layer.len());
             for reference in reference_layer.iter() {
-                let other = other_layer.get_glyph(&reference.name).unwrap();
+                let other = other_layer.get_glyph(&reference.name()).unwrap();
                 assert_glyph_eq(reference, other);
             }
         }
