@@ -12,10 +12,10 @@ mod errors;
 mod structs;
 mod util;
 
-#[derive(Parser)]
-#[clap(author, version, about, long_about = None, propagate_version = true)]
+#[derive(Debug, Parser)]
+#[command(author, version, about, long_about = None, propagate_version = true)]
 struct Cli {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Commands,
 }
 
@@ -23,55 +23,52 @@ struct Cli {
 enum Commands {
     New {
         /// Fontgarden package path to create.
-        #[clap(parse(from_os_str))]
         path: PathBuf,
     },
     Import {
         /// Fontgarden package path to import into.
-        #[clap(parse(from_os_str))]
         fontgarden_path: PathBuf,
 
         /// Text file of glyphs to import, one per line. Use multiple times.
-        #[clap(long = "glyphs-file", parse(from_os_str), value_name = "GLYPHS_FILE")]
+        #[arg(long = "glyphs-file", value_name = "GLYPHS_FILE")]
         glyphs_files: Vec<PathBuf>,
 
         /// Set to import glyphs into. Use multiple times.
-        #[clap(long = "set", value_name = "NAME")]
+        #[arg(long = "set", value_name = "NAME")]
         sets: Vec<Name>,
 
         /// Unified Font Object (UFO) to import from.
-        #[clap(parse(from_os_str), value_name = "UFOS")]
+        #[arg(value_name = "UFOS")]
         fonts: Vec<PathBuf>,
         //
         // TODO:
         // /// Set the source name of the font to be imported.
-        // #[clap(long = "source-name", value_name = "SOURCE_NAME")]
+        // #[arg(long = "source-name", value_name = "SOURCE_NAME")]
         // source_names: Vec<Name>,
     },
-    #[clap(group(
+    #[command(group(
         ArgGroup::new("glyph_names")
             .required(true)
             .args(&["sets", "glyphs-file"]),
     ))]
     Export {
         /// Fontgarden package path to export from.
-        #[clap(parse(from_os_str))]
         fontgarden_path: PathBuf,
 
         /// Sets to export glyphs from. Use multiple times.
-        #[clap(long = "set", value_name = "NAME")]
+        #[arg(long = "set", value_name = "NAME")]
         sets: Vec<Name>,
 
         /// Alternatively, a text file of glyphs to export, one per line.
-        #[clap(long, parse(from_os_str), value_name = "GLYPHS_FILE")]
+        #[arg(long, value_name = "GLYPHS_FILE")]
         glyphs_file: Option<PathBuf>,
 
         /// Sources to export glyphs for [default: all]
-        #[clap(long = "source-name", value_name = "SOURCE_NAME")]
+        #[arg(long = "source-name", value_name = "SOURCE_NAME")]
         source_names: Vec<Name>,
 
         /// Directory to export into [default: current dir].
-        #[clap(long, parse(from_os_str))]
+        #[arg(long)]
         output_dir: Option<PathBuf>,
     },
 }
@@ -126,7 +123,7 @@ fn import(
 ) -> Result<()> {
     if !glyphs_files.is_empty() && glyphs_files.len() != sets.len() {
         error_and_exit(
-            clap::ErrorKind::WrongNumberOfValues,
+            clap::error::ErrorKind::WrongNumberOfValues,
             "The --glyphs-file argument must occur as often as the --set argument.",
         );
     }
@@ -155,7 +152,7 @@ fn import(
                 }
                 None => {
                     error_and_exit(
-                        clap::ErrorKind::ValueValidation,
+                        clap::error::ErrorKind::ValueValidation,
                         format!("Cannot find set named '{}'. To define a new set, use the --glyphs-file argument.", set_name),
                     );
                 }
@@ -251,7 +248,7 @@ fn export(
     Ok(())
 }
 
-fn error_and_exit(kind: clap::ErrorKind, message: impl std::fmt::Display) -> ! {
+fn error_and_exit(kind: clap::error::ErrorKind, message: impl std::fmt::Display) -> ! {
     let mut cmd = Cli::command();
     cmd.error(kind, message).exit();
 }

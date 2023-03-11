@@ -44,7 +44,10 @@ pub(crate) fn extract_glyph_data(
             record.postscript_name = Some(postscript_name.as_string().unwrap().into());
         }
         if let Some(opentype_category) = opentype_categories.get(name) {
-            record.opentype_category = Some(opentype_category.as_string().unwrap().into());
+            record.opentype_category = match opentype_category.as_string() {
+                Some(s) => s.parse().unwrap(),
+                None => crate::structs::OpenTypeCategory::Unassigned,
+            };
         }
         if skip_exports.contains(name.as_ref()) {
             record.export = false;
@@ -107,7 +110,7 @@ pub(crate) fn guess_source_name(font: &norad::Font) -> Option<Name> {
 }
 
 /// Given a glyph `name`, return an appropriate file name.
-/// 
+///
 /// NOTE: Copied from norad 0.7
 pub fn default_file_name_for_glyph_name(name: &Name, existing: &HashSet<String>) -> PathBuf {
     user_name_to_file_name(name, "", ".glif", existing)
@@ -131,7 +134,7 @@ pub fn default_file_name_for_layer_name(name: &Name, existing: &HashSet<String>)
 ///
 /// Panics if a case-insensitive file name clash was detected and no unique
 /// value could be created after 99 numbering attempts.
-/// 
+///
 /// NOTE: Copied from norad 0.7
 fn user_name_to_file_name(
     name: &Name,

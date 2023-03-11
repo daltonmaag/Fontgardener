@@ -5,7 +5,8 @@ use std::{
     str::FromStr,
 };
 
-use norad::{Color, Name};
+use anyhow::anyhow;
+use norad::{Codepoints, Color, Name};
 use serde::{Deserialize, Serialize};
 
 use crate::errors::{
@@ -51,11 +52,35 @@ pub(crate) struct LayerInfo {
 pub struct GlyphRecord {
     pub postscript_name: Option<String>,
     #[serde(default)]
-    pub codepoints: Vec<char>,
-    // TODO: Make an enum
-    pub opentype_category: Option<String>,
+    pub codepoints: norad::Codepoints,
+    pub opentype_category: OpenTypeCategory,
     #[serde(default = "default_true")]
     pub export: bool,
+}
+
+#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum OpenTypeCategory {
+    #[default]
+    Unassigned = 0,
+    Base = 1,
+    Ligature = 2,
+    Mark = 3,
+    Component = 4,
+}
+
+impl FromStr for OpenTypeCategory {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Unassigned" => Ok(Self::Unassigned),
+            "Base" => Ok(Self::Base),
+            "Ligature" => Ok(Self::Ligature),
+            "Mark" => Ok(Self::Mark),
+            "Component" => Ok(Self::Component),
+            _ => Err("Category must be Unassigned, Base, Ligature, Mark or Component"),
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -398,7 +423,14 @@ impl Set {
                         )
                     })?
                 }
-                None => Vec::new(),
+                None => norad::Codepoints::new([]),
+            };
+
+            let opentype_category = match record.3 {
+                Some(s) => s.parse().map_err(|e: &'static str| {
+                    LoadGlyphDataError::InvalidOpenTypeCategory(glyph_name.clone(), s, anyhow!(e))
+                })?,
+                None => OpenTypeCategory::default(),
             };
 
             glyph_data.insert(
@@ -406,7 +438,7 @@ impl Set {
                 GlyphRecord {
                     postscript_name: record.1,
                     codepoints,
-                    opentype_category: record.3,
+                    opentype_category,
                     export: record.4,
                 },
             );
@@ -417,7 +449,7 @@ impl Set {
 
     // NOTE: Use anyhow::Error here because we use anyhow's Context trait in main.
     // Something about Sync and Send.
-    fn parse_codepoints(v: &str) -> Result<Vec<char>, anyhow::Error> {
+    fn parse_codepoints(v: &str) -> Result<Codepoints, anyhow::Error> {
         let mut codepoints = Vec::new();
         let mut seen = HashSet::new();
 
@@ -429,7 +461,7 @@ impl Set {
             }
         }
 
-        Ok(codepoints)
+        Ok(norad::Codepoints::new(codepoints))
     }
 
     fn write_glyph_data(
@@ -451,7 +483,7 @@ impl Set {
             let codepoints_str: String = record
                 .codepoints
                 .iter()
-                .map(|c| format!("{:04X}", *c as usize))
+                .map(|c| format!("{:04X}", c as usize))
                 .collect::<Vec<_>>()
                 .join(" ");
             writer.serialize((

@@ -39,6 +39,8 @@ pub enum LoadGlyphDataError {
     InvalidGlyphName(String, #[source] norad::error::NamingError),
     #[error("invalid codepoint '{1}' for glyph {0}")]
     InvalidCodepoint(Name, String, #[source] anyhow::Error),
+    #[error("invalid OpenType category '{1}' for glyph {0}")]
+    InvalidOpenTypeCategory(Name, String, #[source] anyhow::Error),
 }
 
 #[derive(Error, Debug)]
